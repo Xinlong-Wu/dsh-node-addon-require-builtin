@@ -13,7 +13,9 @@ node-addon-require-builtin
 node-addon-require-builtin-darwin-arm64
 node-addon-require-builtin-darwin-x64
 node-addon-require-builtin-linux-arm64-gnu
+node-addon-require-builtin-linux-arm64-musl
 node-addon-require-builtin-linux-x64-gnu
+node-addon-require-builtin-linux-x64-musl
 node-addon-require-builtin-win32-arm64-msvc
 node-addon-require-builtin-win32-ia32-msvc
 node-addon-require-builtin-win32-x64-msvc
@@ -21,7 +23,9 @@ node-addon-internal-loader
 node-addon-internal-loader-darwin-arm64
 node-addon-internal-loader-darwin-x64
 node-addon-internal-loader-linux-arm64-gnu
+node-addon-internal-loader-linux-arm64-musl
 node-addon-internal-loader-linux-x64-gnu
+node-addon-internal-loader-linux-x64-musl
 node-addon-internal-loader-win32-arm64-msvc
 node-addon-internal-loader-win32-ia32-msvc
 node-addon-internal-loader-win32-x64-msvc

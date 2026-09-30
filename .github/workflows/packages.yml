@@ -1,0 +1,92 @@
+name: Package and verify installs
+
+on:
+  workflow_call:
+    inputs:
+      publish:
+        type: boolean
+        default: false
+
+jobs:
+  matrix:
+    runs-on: ubuntu-24.04
+    outputs:
+      installs: ${{ steps.matrix.outputs.installs }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: matrix
+        run: echo "installs=$(node scripts/github-matrix.mjs package-install-platforms)" >> "$GITHUB_OUTPUT"
+
+  pack:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9.15.9
+          run_install: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+          cache-dependency-path: pnpm-lock.yaml
+      - run: pnpm install --ignore-scripts --frozen-lockfile
+      - run: pnpm build:ts
+      - name: Verify release version
+        run: node scripts/verify-release.mjs
+        env:
+          RELEASE_PUBLISH: ${{ inputs.publish }}
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: prebuild-*
+          path: .cache/prebuild-artifacts
+      - name: Assemble and verify all platform payloads
+        run: |
+          node scripts/assemble-prebuilds.mjs .cache/prebuild-artifacts
+          node scripts/verify-release.mjs --prebuilds
+        env:
+          RELEASE_PUBLISH: ${{ inputs.publish }}
+      - name: Pack all release tarballs
+        run: node scripts/pack-release.mjs dist/npm
+      - uses: actions/upload-artifact@v4
+        with:
+          name: npm-tarballs
+          path: dist/npm/*
+          if-no-files-found: error
+          retention-days: 7
+
+  install:
+    name: 'npm install: ${{ matrix.platform }} / Node ${{ matrix.node }}'
+    needs: [matrix, pack]
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJson(needs.matrix.outputs.installs) }}
+    env:
+      NARB_EXPECTED_ARCH: ${{ matrix.arch }}
+      NARB_EXPECTED_LIBC: ${{ matrix.libc }}
+      NARB_EXPECTED_NODE_MAJOR: ${{ matrix.node }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: npm-tarballs
+          path: dist/npm
+      - uses: actions/setup-node@v4
+        if: matrix.image == ''
+        with:
+          node-version: ${{ matrix.node }}
+          architecture: ${{ matrix.nodearch }}
+      - name: Verify installed packages on native runtime
+        if: matrix.image == ''
+        run: node scripts/verify-packed-install.mjs dist/npm
+      - name: Verify installed packages in Linux runtime
+        if: matrix.image != ''
+        shell: bash
+        run: |
+          bash scripts/pull-container.sh '${{ matrix.image }}' --platform '${{ matrix.docker_platform }}'
+          docker run --rm --pull=never --platform '${{ matrix.docker_platform }}' \
+            --network none --read-only --tmpfs /tmp:rw,exec,nosuid \
+            --env NARB_EXPECTED_ARCH --env NARB_EXPECTED_LIBC --env NARB_EXPECTED_NODE_MAJOR \
+            --volume "$GITHUB_WORKSPACE:/workspace:ro" --workdir /workspace \
+            '${{ matrix.image }}' node scripts/verify-packed-install.mjs dist/npm

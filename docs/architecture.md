@@ -183,14 +183,14 @@ Implemented parser families:
 
 - macOS arm64
 - macOS x64
-- Linux glibc arm64
-- Linux glibc x64
+- Linux arm64 (glibc and musl)
+- Linux x64 (glibc and musl)
 - Windows arm64
 - Windows x64
 - Windows x86 (`ia32`, Node 20/22 only — Node ships no 32-bit Windows runtime after v22)
 
-Linux musl is intentionally not published until its full runtime probing path is
-implemented and CI-validated.
+Linux musl prebuilds use Alpine 3.23 and the same per-architecture parsers as
+glibc. Packed npm installs are tested separately with musl Node 20/22/24/26.
 
 ## Build Outputs
 

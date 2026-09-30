@@ -382,6 +382,14 @@ int main() {
                "fx", 16),
            0x1c0, GetterCallMode::kDirectReturn);
 
+  // Alpine 3.23 aarch64 nodejs-24.18.1-r0, read from /usr/bin/node:
+  // bti c; ldr x0,[x0,#0x200]; ret. musl uses the same AAPCS64 decoder.
+  ExpectOk("fixture arm64/alpine323-node24-musl",
+           MatchArm64AapcsFieldGetter(
+               Arm64Words({0xd503245f, 0xf9410000, 0xd65f03c0}).data(),
+               "linux-arm64", 16),
+           0x200, GetterCallMode::kDirectReturn);
+
   // --- arm64 AAPCS walker (linux): tolerates hardened prologue/epilogue ---
   // The real shape Fedora 44 emits for both nodejs22 (libnode.so.127) and
   // nodejs24 (libnode.so.137) on aarch64, verified by disassembling the packaged
@@ -395,8 +403,8 @@ int main() {
                                 0xd50323bfu, 0xd65f03c0u},
                                8)
                         .data(),
-                    "linux-glibc-arm64", 32),
-                0x200, "linux-glibc-arm64 pac-frame-ldr-x0-[this-imm]-ret");
+                    "linux-arm64", 32),
+                0x200, "linux-arm64 pac-frame-ldr-x0-[this-imm]-ret");
 
   // Unhardened shapes must report byte-identically to MatchArm64FieldGetter, so
   // moving linux-arm64 onto the walker cannot change existing diagnostics.
@@ -734,7 +742,7 @@ int main() {
   // The expected offsets were derived by an independent decoder in the generator
   // script, so agreement here is a genuine cross-check.
   //
-  // Each fixture runs through the same two-stage sequence the linux_glibc_*
+  // Each fixture runs through the same two-stage sequence the Linux
   // parsers use — standard window first, wider window only on failure — so this
   // exercises the production decode path rather than a single matcher. The stage
   // that resolved each shape is reported, which is what documents that only

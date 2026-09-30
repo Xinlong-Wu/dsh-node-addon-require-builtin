@@ -8,14 +8,14 @@ Result<GetterPattern> ParseBuiltinModuleRequireGetterOffset(void* getter) {
   return ParseDarwinArm64BuiltinModuleRequireGetterOffset(getter);
 #elif defined(__APPLE__) && defined(__x86_64__)
   return ParseDarwinX64BuiltinModuleRequireGetterOffset(getter);
-#elif defined(__linux__) && defined(__GLIBC__) && defined(__aarch64__)
-  return ParseLinuxGlibcArm64BuiltinModuleRequireGetterOffset(getter);
-#elif defined(__linux__) && defined(__GLIBC__) && defined(__x86_64__)
-  return ParseLinuxGlibcX64BuiltinModuleRequireGetterOffset(getter);
+#elif defined(__linux__) && defined(__aarch64__)
+  return ParseLinuxArm64BuiltinModuleRequireGetterOffset(getter);
+#elif defined(__linux__) && defined(__x86_64__)
+  return ParseLinuxX64BuiltinModuleRequireGetterOffset(getter);
 #elif defined(__linux__)
   return Result<GetterPattern>::Failure(Status::Failure(
       ProbeStatus::kUnsupportedNoGetter,
-      "unsupported linux libc getter parser"));
+      "unsupported linux architecture getter parser"));
 #elif defined(_WIN32) && defined(_M_ARM64)
   return ParseWin32Arm64BuiltinModuleRequireGetterOffset(getter);
 #elif defined(_WIN32) && defined(_M_X64)

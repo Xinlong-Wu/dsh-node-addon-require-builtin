@@ -9,8 +9,10 @@ const RUNNERS = {
   'darwin-arm64': 'macos-15',
   'darwin-x64': 'macos-15-intel',
   'linux-arm64-gnu': 'ubuntu-24.04-arm',
+  'linux-arm64-musl': 'ubuntu-24.04-arm',
   'linux-x64-gnu': 'ubuntu-24.04',
-  'win32-arm64-msvc': 'windows-11-arm',
+  'linux-x64-musl': 'ubuntu-24.04',
+  'win32-arm64-msvc': 'windows-11-vs2026-arm',
   // Keep release builds on the oldest supported hosted Windows image so a
   // runner/toolset update cannot silently raise the prebuild's OS baseline.
   'win32-ia32-msvc': 'windows-2022',
@@ -91,8 +93,8 @@ function platformMatrix() {
 // halves it. The prebuilt binaries themselves are per family and still built,
 // verified and uploaded separately.
 //
-// Release deliberately keeps the unaggregated matrix: publishing wants each
-// platform package's artifact produced by its own job.
+// Host release builds keep the unaggregated matrix. The Alpine builder shares
+// setup across families and still uploads one artifact per platform package.
 function ciPlatformMatrix() {
   const platforms = new Map();
   for (const family of FAMILIES) {
@@ -131,7 +133,10 @@ function hmrPlatformMatrix() {
   // runs against the whitelisted internal-loader product only.
   const family = 'internal-loader';
   return {
-    include: platformDirsFor(family).map((dir) => platformEntry(family, dir)),
+    // The HMR driver runs on the host, whose Linux Node uses glibc.
+    include: platformDirsFor(family)
+      .filter((dir) => !dir.endsWith('-musl'))
+      .map((dir) => platformEntry(family, dir)),
   };
 }
 
@@ -221,6 +226,7 @@ function electronPlatformMatrix() {
 const DISTROS = [
   {
     id: 'fedora-44',
+    libc: 'glibc',
     image: 'registry.fedoraproject.org/fedora:44',
     streams: [20, 22, 24],
     install: 'dnf install -y --setopt=install_weak_deps=False nodejs$V binutils',
@@ -229,6 +235,7 @@ const DISTROS = [
   },
   {
     id: 'fedora-rawhide',
+    libc: 'glibc',
     image: 'registry.fedoraproject.org/fedora:rawhide',
     // Where Node 26 landed first (nodejs26-26.3.1-5.fc45). Rolling by
     // definition, so its churn warns rather than fails.
@@ -239,6 +246,7 @@ const DISTROS = [
   },
   {
     id: 'debian-13',
+    libc: 'glibc',
     image: 'docker.io/library/debian:trixie',
     // trixie ships Node 20.19.2, confirmed via sources.debian.org, and its
     // getter bytes were read out of the packaged libnode115.
@@ -253,6 +261,7 @@ const DISTROS = [
   },
   {
     id: 'rocky-9',
+    libc: 'glibc',
     image: 'quay.io/rockylinux/rockylinux:9',
     // RHEL 9's default nodejs is 16, below this project's floor, so the module
     // stream is selected explicitly. Its packaged aarch64 libnode was measured
@@ -267,6 +276,7 @@ const DISTROS = [
   },
   {
     id: 'almalinux-9',
+    libc: 'glibc',
     image: 'quay.io/almalinuxorg/almalinux:9',
     streams: [20, 22],
     install: 'dnf module install -y nodejs:$V && dnf install -y binutils',
@@ -275,6 +285,7 @@ const DISTROS = [
   },
   {
     id: 'amazonlinux-2023',
+    libc: 'glibc',
     image: 'public.ecr.aws/amazonlinux/amazonlinux:2023',
     // Its default nodejs is 18 and, more importantly, statically linked with no
     // shared libnode, so the private getter symbol is not exported and the probe
@@ -288,6 +299,7 @@ const DISTROS = [
   },
   {
     id: 'opensuse-leap-15',
+    libc: 'glibc',
     image: 'registry.opensuse.org/opensuse/leap:15.6',
     // Passing already; kept optional until a couple of runs confirm stability.
     streams: ['default'],
@@ -297,7 +309,8 @@ const DISTROS = [
   },
   {
     id: 'ubuntu-2604',
-    image: 'public.ecr.aws/ubuntu/ubuntu:26.04',
+    libc: 'glibc',
+    image: 'docker.io/library/ubuntu:26.04',
     // 24.04 was measured and deliberately skipped: no branch protection and its
     // Node is 18. This entry only pays off if 26.04 ships Node 20 or newer,
     // hence optional.
@@ -306,6 +319,16 @@ const DISTROS = [
       'DEBIAN_FRONTEND=noninteractive apt-get update -qq && DEBIAN_FRONTEND=noninteractive apt-get install -y -qq --no-install-recommends nodejs binutils',
     binary: '/usr/bin/node',
     probe: 'dpkg -S "$node_bin"',
+  },
+  {
+    id: 'alpine-3.23',
+    libc: 'musl',
+    image: 'docker.io/library/alpine:3.23',
+    shell: 'sh',
+    streams: ['default'],
+    install: 'apk add --no-cache nodejs binutils',
+    binary: '/usr/bin/node',
+    probe: 'apk list --installed nodejs musl',
   },
 ];
 
@@ -321,13 +344,12 @@ function distroPlatformMatrix() {
   for (const family of FAMILIES) {
     for (const dir of platformDirsFor(family)) {
       const platform = path.basename(dir);
-      // Only the glibc Linux platforms: these jobs run a distribution's own Node
-      // package, which exists on Linux only.
       if (!platform.startsWith('linux-')) continue;
       if (platforms.has(platform)) continue;
       const entry = platformEntry(family, dir);
       platforms.set(platform, {
         platform,
+        libc: platform.endsWith('-musl') ? 'musl' : 'glibc',
         runner: entry.runner,
         build_node: entry.build_node,
       });
@@ -337,6 +359,7 @@ function distroPlatformMatrix() {
   const include = [];
   for (const base of platforms.values()) {
     for (const distro of DISTROS) {
+      if (distro.libc !== base.libc) continue;
       include.push({
         ...base,
         // Space separated so the job can iterate these in shell.
@@ -346,6 +369,7 @@ function distroPlatformMatrix() {
         artifact_pattern: `prebuild-*-${base.platform}-napi-v9`,
         distro: distro.id,
         distro_image: distro.image,
+        distro_shell: distro.shell || 'bash',
         distro_streams: distro.streams.join(' '),
         distro_install: distro.install,
         distro_binary: distro.binary,
@@ -356,13 +380,59 @@ function distroPlatformMatrix() {
   return { include };
 }
 
+function ciMuslPlatformMatrix() {
+  return {
+    include: ciPlatformMatrix().include
+      .filter((entry) => entry.platform.endsWith('-musl'))
+      .map((entry) => {
+        const arch = entry.platform.split('-')[1];
+        return {
+          ...entry,
+          arch,
+          runner_arch: arch === 'arm64' ? 'ARM64' : 'X64',
+          docker_platform: arch === 'arm64' ? 'linux/arm64' : 'linux/amd64',
+        };
+      }),
+  };
+}
+
+function hostPlatforms(matrix) {
+  return { include: matrix.include.filter((entry) => !entry.platform.endsWith('-musl')) };
+}
+
+function packageInstallMatrix() {
+  const include = [];
+  for (const entry of ciPlatformMatrix().include) {
+    const arch = entry.platform.split('-')[1];
+    const linux = entry.platform.startsWith('linux-');
+    const libc = linux ? entry.platform.split('-')[2] : '';
+    const majors = entry.platform === 'win32-ia32-msvc' ? [20, 22] : [20, 22, 24, 26];
+    for (const node of majors) {
+      include.push({
+        platform: entry.platform,
+        runner: entry.runner,
+        arch,
+        node,
+        nodearch: entry.nodearch || arch,
+        libc,
+        image: linux ? `docker.io/library/node:${node}-${libc === 'musl' ? 'alpine3.23' : 'bookworm-slim'}` : '',
+        docker_platform: linux ? `linux/${arch === 'x64' ? 'amd64' : 'arm64'}` : '',
+      });
+    }
+  }
+  return { include };
+}
+
 const target = process.argv[2];
 const matrices = {
-  'ci-platforms': ciPlatformMatrix,
+  // musl builds in Alpine rather than in the host runner's glibc environment.
+  'ci-platforms': () => hostPlatforms(ciPlatformMatrix()),
+  'ci-musl-platforms': ciMuslPlatformMatrix,
   'ci-electron-platforms': electronPlatformMatrix,
   'ci-hmr-platforms': hmrPlatformMatrix,
   'ci-distro-platforms': distroPlatformMatrix,
-  'release-platforms': platformMatrix,
+  'package-install-platforms': packageInstallMatrix,
+  'release-platforms': () => hostPlatforms(platformMatrix()),
 };
 
 if (!target || !matrices[target]) {

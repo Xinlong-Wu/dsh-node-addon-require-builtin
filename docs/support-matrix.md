@@ -47,6 +47,8 @@ matrix:
 | `darwin-x64` | Supported | Supported | Supported | Supported |
 | `linux-arm64-gnu` | Supported | Supported | Supported | Supported |
 | `linux-x64-gnu` | Supported | Supported | Supported | Supported |
+| `linux-arm64-musl` | Supported | Supported | Supported | Supported |
+| `linux-x64-musl` | Supported | Supported | Supported | Supported |
 | `win32-arm64-msvc` | Supported | Supported | Supported | Supported |
 | `win32-ia32-msvc` | Supported | Supported | No 32-bit runtime | No 32-bit runtime |
 | `win32-x64-msvc` | Supported | Supported | Supported | Supported |
@@ -95,8 +97,10 @@ across an optimization and hardening matrix, plus bytes read out of shipped
 binaries; see `scripts/collect-getter-fixtures.mjs`.
 
 Windows x64 and x86 prebuilds are built and tested on the Windows Server 2022
-runner; ARM64 uses the Windows 11 ARM runner. All Windows builds pin Visual
-Studio 2022 and CI rejects dynamic MSVC/UCRT runtime dependencies.
+runner with VS2022; ARM64 uses the Windows 11 VS2026 runner with the older
+MSVC 14.44/v143 toolset and Windows SDK 10.0.26100.0 explicitly selected.
+CI verifies the ARM64 toolchain and static CRT selection, and rejects dynamic
+MSVC/UCRT runtime dependencies on all Windows targets.
 
 Published backend artifacts for each product family:
 
@@ -106,16 +110,19 @@ Published backend artifacts for each product family:
 | `darwin-x64` | `napi-v9` |
 | `linux-arm64-gnu` | `napi-v9` |
 | `linux-x64-gnu` | `napi-v9` |
+| `linux-arm64-musl` | `napi-v9` |
+| `linux-x64-musl` | `napi-v9` |
 | `win32-arm64-msvc` | `napi-v9` |
 | `win32-ia32-msvc` | `napi-v9` |
 | `win32-x64-msvc` | `napi-v9` |
 
-Not published yet:
-
-| Platform suffix | Reason |
-|---|---|
-| `linux-arm64-musl` | musl getter parser not implemented |
-| `linux-x64-musl` | musl getter parser not implemented |
+Musl prebuilds use Alpine 3.23. CI and release share one packaging and npm install
+workflow for every platform, covering Node 20, 22, 24 and 26 (Windows ia32: 20/22).
+Linux glibc and musl use separate runtime containers. The loader must resolve
+the matching optional
+package with local builds disabled; missing and wrong-product binaries are rejected.
+Alpine's own `apk` Node package also runs in the mandatory distro matrix on both
+architectures, consuming the musl prebuild artifacts without rebuilding them.
 
 Supported platform packages are exercised in CI with N-API optional prebuild
 builds across supported Node majors, both product families, optional package

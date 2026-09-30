@@ -46,10 +46,10 @@ Result<CurrentContextRead> ReadDarwinArm64CurrentV8Context(
 Result<CurrentContextRead> ReadDarwinX64CurrentV8Context(
     void* isolate,
     const CurrentContextSymbols& symbols);
-Result<CurrentContextRead> ReadLinuxGlibcArm64CurrentV8Context(
+Result<CurrentContextRead> ReadLinuxArm64CurrentV8Context(
     void* isolate,
     const CurrentContextSymbols& symbols);
-Result<CurrentContextRead> ReadLinuxGlibcX64CurrentV8Context(
+Result<CurrentContextRead> ReadLinuxX64CurrentV8Context(
     void* isolate,
     const CurrentContextSymbols& symbols);
 Result<CurrentContextRead> ReadWin32Arm64CurrentV8Context(

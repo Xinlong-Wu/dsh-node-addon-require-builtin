@@ -43,7 +43,7 @@ constexpr size_t kX86GetterCodeWindowBytes = 24;
 //     mov rax,[rdi+disp32]; pop rbp; ret
 //
 // Both architectures therefore get the same retry-in-a-wider-window treatment
-// (see the linux_glibc_* parsers). Growing kGetterCodeWindowBytes itself would
+// (see the Linux parsers). Growing kGetterCodeWindowBytes itself would
 // lengthen the memcpy every matcher performs on every platform, including the
 // Windows vtable scanner that walks arbitrary code pointers, so the longer
 // bodies get their own opt-in window instead.
@@ -101,7 +101,7 @@ Result<GetterPattern> MatchArm64FieldGetter(void* getter,
 // were never broken by distribution hardening while AArch64 was.
 //
 // Used by linux-arm64 for both stages of its two-stage decode, mirroring
-// linux_glibc_x64.cc. Because it walks, the hardened shapes that fit inside
+// linux_x64.cc. Because it walks, the hardened shapes that fit inside
 // kGetterCodeWindowBytes are resolved in the first stage and never need the wider
 // window: `paciasp; ldr; retaa` (clang) is 12 bytes and
 // `paciasp; ldr; autiasp; ret` (GCC) is exactly 16, in either instruction order.

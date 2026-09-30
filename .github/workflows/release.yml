@@ -65,11 +65,16 @@ jobs:
       - name: Build TypeScript entrypoints
         run: pnpm build:ts
 
+      - name: Select VS2022-compatible ARM64 toolchain
+        if: matrix.platform == 'win32-arm64-msvc'
+        shell: pwsh
+        run: ./scripts/prepare-windows-arm64-toolchain.ps1
+
       - name: Build N-API prebuild
         if: runner.os != 'Linux'
         run: pnpm build:prebuild:napi
         env:
-          npm_config_msvs_version: ${{ runner.os == 'Windows' && '2022' || '' }}
+          npm_config_msvs_version: ${{ matrix.platform == 'win32-arm64-msvc' && env.npm_config_msvs_version || runner.os == 'Windows' && '2022' || '' }}
 
       - name: Build and test N-API prebuild on glibc 2.28
         if: runner.os == 'Linux'
@@ -259,67 +264,23 @@ jobs:
           if-no-files-found: error
           retention-days: 7
 
-  pack:
-    name: Pack npm tarballs
-    needs: build-and-test-napi
-    runs-on: ubuntu-24.04
-    steps:
-      - uses: actions/checkout@v4
+  musl:
+    uses: ./.github/workflows/prebuild-musl.yml
 
-      - uses: pnpm/action-setup@v4
-        with:
-          version: 9.15.9
-          run_install: false
+  distro-node:
+    needs: [build-and-test-napi, musl]
+    uses: ./.github/workflows/distro-node.yml
 
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 24
-          cache: pnpm
-          cache-dependency-path: pnpm-lock.yaml
-
-      - name: Install dependencies without package install scripts
-        run: pnpm install --ignore-scripts --frozen-lockfile
-
-      - name: Build TypeScript entrypoints
-        run: pnpm build:ts
-
-      - name: Verify release version
-        run: node ./scripts/verify-release.mjs
-        env:
-          RELEASE_PUBLISH: ${{ inputs.publish }}
-
-      - name: Download prebuild artifacts
-        uses: actions/download-artifact@v4
-        with:
-          pattern: prebuild-*
-          path: .release/prebuild-artifacts
-
-      - name: Assemble and verify prebuilds
-        run: node ./scripts/assemble-prebuilds.mjs .release/prebuild-artifacts
-
-      - name: Verify release payload
-        run: node ./scripts/verify-release.mjs --prebuilds
-        env:
-          RELEASE_PUBLISH: ${{ inputs.publish }}
-
-      - name: Pack release tarballs
-        run: node ./scripts/pack-release.mjs dist/npm
-
-      - name: Verify packed install
-        run: node ./scripts/verify-packed-install.mjs dist/npm
-
-      - name: Upload npm tarballs
-        uses: actions/upload-artifact@v4
-        with:
-          name: npm-tarballs
-          path: dist/npm/*
-          if-no-files-found: error
-          retention-days: 7
+  packages:
+    needs: [build-and-test-napi, musl]
+    uses: ./.github/workflows/packages.yml
+    with:
+      publish: ${{ inputs.publish }}
 
   publish:
     name: Publish to npm
     if: inputs.publish
-    needs: pack
+    needs: [packages, distro-node]
     runs-on: ubuntu-24.04
     environment: npm-publish
     permissions:
