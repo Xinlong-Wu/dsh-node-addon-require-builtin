@@ -28,12 +28,12 @@ Result<CurrentContextRead> ReadCurrentV8Context(
   return ReadDarwinArm64CurrentV8Context(isolate, symbols);
 #elif defined(__APPLE__) && defined(__x86_64__)
   return ReadDarwinX64CurrentV8Context(isolate, symbols);
-#elif defined(__linux__) && defined(__GLIBC__) && defined(__aarch64__)
-  return ReadLinuxGlibcArm64CurrentV8Context(isolate, symbols);
-#elif defined(__linux__) && defined(__GLIBC__) && defined(__x86_64__)
-  return ReadLinuxGlibcX64CurrentV8Context(isolate, symbols);
+#elif defined(__linux__) && defined(__aarch64__)
+  return ReadLinuxArm64CurrentV8Context(isolate, symbols);
+#elif defined(__linux__) && defined(__x86_64__)
+  return ReadLinuxX64CurrentV8Context(isolate, symbols);
 #elif defined(__linux__)
-  return UnsupportedContextReader("unsupported linux libc current-context reader");
+  return UnsupportedContextReader("unsupported linux architecture current-context reader");
 #elif defined(_WIN32) && defined(_M_ARM64)
   return ReadWin32Arm64CurrentV8Context(isolate, symbols);
 #elif defined(_WIN32) && defined(_M_X64)

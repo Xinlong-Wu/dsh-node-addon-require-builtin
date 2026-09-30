@@ -5,8 +5,10 @@
 
 namespace esplus::node::require_builtin {
 
-Result<GetterPattern> ParseLinuxGlibcArm64BuiltinModuleRequireGetterOffset(
+Result<GetterPattern> ParseLinuxArm64BuiltinModuleRequireGetterOffset(
     void* getter) {
+  // glibc and musl use the same AAPCS64 C++ member calling convention. The
+  // runtime's actual instructions, not its libc or version, select the offset.
   // The same matcher runs in both stages, so what differs between them is only
   // the window. Walking instead of matching fixed positions is what gives AArch64
   // the tolerance the x86-64 side always had, and it is why hardened x86-64 builds
@@ -19,8 +21,8 @@ Result<GetterPattern> ParseLinuxGlibcArm64BuiltinModuleRequireGetterOffset(
   // that carry a frame record, which is what pushes Fedora's getter to 28 bytes —
   // its build flags combine `-mbranch-protection=standard` with
   // `-mno-omit-leaf-frame-pointer`, so even this leaf accessor gets a frame.
-  return DecodeGetterWithWideWindowRetry(getter, "linux-glibc-arm64",
-                                         MatchArm64AapcsFieldGetter);
+  return DecodeGetterWithWideWindowRetry(getter, "linux-arm64",
+                                        MatchArm64AapcsFieldGetter);
 }
 
 }  // namespace esplus::node::require_builtin
