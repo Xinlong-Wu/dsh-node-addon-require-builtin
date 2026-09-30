@@ -10,6 +10,9 @@ import { spawn, spawnSync } from 'node:child_process';
 import { allPublishDirs, entryDirFor, FAMILIES, platformDirsFor, readJson, root } from './packages.mjs';
 
 const tarballDir = path.resolve(process.argv[2] || path.join(root, 'dist', 'npm'));
+if (process.env.NARB_EXPECTED_NODE_MAJOR) {
+  assert.equal(process.versions.node.split('.')[0], process.env.NARB_EXPECTED_NODE_MAJOR);
+}
 
 function capture(command, args) {
   const result = spawnSync(command, args, { encoding: 'utf8' });

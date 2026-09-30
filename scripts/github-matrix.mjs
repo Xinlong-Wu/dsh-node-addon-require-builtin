@@ -400,6 +400,29 @@ function hostPlatforms(matrix) {
   return { include: matrix.include.filter((entry) => !entry.platform.endsWith('-musl')) };
 }
 
+function packageInstallMatrix() {
+  const include = [];
+  for (const entry of ciPlatformMatrix().include) {
+    const arch = entry.platform.split('-')[1];
+    const linux = entry.platform.startsWith('linux-');
+    const libc = linux ? entry.platform.split('-')[2] : '';
+    const majors = entry.platform === 'win32-ia32-msvc' ? [20, 22] : [20, 22, 24, 26];
+    for (const node of majors) {
+      include.push({
+        platform: entry.platform,
+        runner: entry.runner,
+        arch,
+        node,
+        nodearch: entry.nodearch || arch,
+        libc,
+        image: linux ? `docker.io/library/node:${node}-${libc === 'musl' ? 'alpine3.23' : 'bookworm-slim'}` : '',
+        docker_platform: linux ? `linux/${arch === 'x64' ? 'amd64' : 'arm64'}` : '',
+      });
+    }
+  }
+  return { include };
+}
+
 const target = process.argv[2];
 const matrices = {
   // musl builds in Alpine rather than in the host runner's glibc environment.
@@ -408,6 +431,7 @@ const matrices = {
   'ci-electron-platforms': electronPlatformMatrix,
   'ci-hmr-platforms': hmrPlatformMatrix,
   'ci-distro-platforms': distroPlatformMatrix,
+  'package-install-platforms': packageInstallMatrix,
   'release-platforms': () => hostPlatforms(platformMatrix()),
 };
 

@@ -520,13 +520,9 @@ jobs:
   musl:
     uses: ./.github/workflows/prebuild-musl.yml
 
-  pack:
+  packages:
     needs: [supported, musl]
-    uses: ./.github/workflows/pack.yml
-
-  packed-musl:
-    needs: pack
-    uses: ./.github/workflows/packed-musl.yml
+    uses: ./.github/workflows/packages.yml
 
   hmr-comparison:
     name: 'HMR Test: ${{ matrix.family }} / ${{ matrix.platform }}'

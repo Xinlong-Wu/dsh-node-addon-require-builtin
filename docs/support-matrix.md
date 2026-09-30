@@ -116,9 +116,10 @@ Published backend artifacts for each product family:
 | `win32-ia32-msvc` | `napi-v9` |
 | `win32-x64-msvc` | `napi-v9` |
 
-Musl prebuilds use Alpine 3.23. CI and release share the Alpine build workflow,
-then install the packed entry packages through npm on native arm64/x64 runners
-with musl Node 20, 22, 24 and 26. The loader must resolve the matching optional
+Musl prebuilds use Alpine 3.23. CI and release share one packaging and npm install
+workflow for every platform, covering Node 20, 22, 24 and 26 (Windows ia32: 20/22).
+Linux glibc and musl use separate runtime containers. The loader must resolve
+the matching optional
 package with local builds disabled; missing and wrong-product binaries are rejected.
 Alpine's own `apk` Node package also runs in the mandatory distro matrix on both
 architectures, consuming the musl prebuild artifacts without rebuilding them.
