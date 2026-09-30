@@ -1,6 +1,6 @@
 {
   "name": "node-addon-internal-loader-linux-arm64-musl",
-  "version": "0.1.6",
+  "version": "0.1.7",
   "description": "Prebuilt linux-arm64-musl native addon package for node-addon-internal-loader.",
   "main": "./index.js",
   "publishConfig": {

@@ -1,6 +1,6 @@
 {
   "name": "node-addon-internal-loader-linux-arm64-gnu",
-  "version": "0.1.6",
+  "version": "0.1.7",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/deepseek-ai/dsh-node-addon-require-builtin.git",
