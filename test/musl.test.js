@@ -57,8 +57,8 @@ for (const product of ['require-builtin', 'internal-loader']) {
       NARB_EXPECTED_PRODUCT: product,
       NARB_BACKEND: backend,
       NARB_EXPECTED_BACKEND: backend,
-      NARB_DISABLE_OPTIONAL_PACKAGE: '1',
-      NARB_DISABLE_LOCAL_BUILD: '0',
+      NARB_DISABLE_OPTIONAL_PACKAGE: backend === 'napi' ? '0' : '1',
+      NARB_DISABLE_LOCAL_BUILD: backend === 'napi' ? '1' : '0',
     };
     run(process.execPath, ['test/backend.test.js'], env);
     run(process.execPath, ['--expose-internals', 'test/require-parity.test.js'], env);

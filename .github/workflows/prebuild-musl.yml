@@ -1,0 +1,65 @@
+name: Musl prebuilds
+
+on:
+  workflow_call:
+
+jobs:
+  matrix:
+    runs-on: ubuntu-24.04
+    outputs:
+      platforms: ${{ steps.matrix.outputs.platforms }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: matrix
+        run: echo "platforms=$(node scripts/github-matrix.mjs ci-musl-platforms)" >> "$GITHUB_OUTPUT"
+
+  build:
+    name: 'musl: Alpine 3.23 / ${{ matrix.arch }} / Node 24'
+    needs: matrix
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJson(needs.matrix.outputs.platforms) }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build musl packages and runtime-only validation image
+        run: |
+          test "$RUNNER_ARCH" = '${{ matrix.runner_arch }}'
+          docker build --platform '${{ matrix.docker_platform }}' --progress plain \
+            -f scripts/musl.Dockerfile -t narb-musl-validation .
+      - name: Collect binaries and build evidence
+        run: |
+          mkdir -p .cache/musl
+          container=$(docker create narb-musl-validation)
+          trap 'docker rm "$container"' EXIT
+          docker cp "$container:/workspace/." .cache/musl/
+      - name: Test optional N-API packages and nodeabi source builds
+        shell: bash
+        run: |
+          docker run --rm --network none --read-only --tmpfs /tmp:rw,exec,nosuid \
+            --platform '${{ matrix.docker_platform }}' --env NARB_EXPECTED_ARCH=${{ matrix.arch }} \
+            narb-musl-validation 2>&1 | tee .cache/musl-validation.log
+      - name: Upload require-builtin prebuild
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.uploads[0].artifact }}
+          path: .cache/musl/${{ matrix.uploads[0].path }}
+          if-no-files-found: error
+          retention-days: 7
+      - name: Upload internal-loader prebuild
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.uploads[1].artifact }}
+          path: .cache/musl/${{ matrix.uploads[1].path }}
+          if-no-files-found: error
+          retention-days: 7
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: validation-${{ matrix.platform }}-node24
+          path: |
+            .cache/musl/
+            .cache/musl-validation.log
+          include-hidden-files: true
+          if-no-files-found: warn
+          retention-days: 7

@@ -1,0 +1,31 @@
+{
+  "name": "node-addon-internal-loader-linux-arm64-musl",
+  "version": "0.1.6",
+  "description": "Prebuilt linux-arm64-musl native addon package for node-addon-internal-loader.",
+  "main": "./index.js",
+  "publishConfig": {
+    "access": "public"
+  },
+  "os": [
+    "linux"
+  ],
+  "cpu": [
+    "arm64"
+  ],
+  "engines": {
+    "node": ">=20"
+  },
+  "files": [
+    "index.js",
+    "README.md",
+    "prebuilds.json",
+    "prebuilt/"
+  ],
+  "dependencies": {
+    "node-addon-native-custom-loader": "workspace:*"
+  },
+  "license": "MIT",
+  "libc": [
+    "musl"
+  ]
+}

@@ -25,7 +25,9 @@ node-addon-require-builtin
 node-addon-require-builtin-darwin-arm64
 node-addon-require-builtin-darwin-x64
 node-addon-require-builtin-linux-arm64-gnu
+node-addon-require-builtin-linux-arm64-musl
 node-addon-require-builtin-linux-x64-gnu
+node-addon-require-builtin-linux-x64-musl
 node-addon-require-builtin-win32-arm64-msvc
 node-addon-require-builtin-win32-ia32-msvc
 node-addon-require-builtin-win32-x64-msvc
@@ -33,7 +35,9 @@ node-addon-internal-loader
 node-addon-internal-loader-darwin-arm64
 node-addon-internal-loader-darwin-x64
 node-addon-internal-loader-linux-arm64-gnu
+node-addon-internal-loader-linux-arm64-musl
 node-addon-internal-loader-linux-x64-gnu
+node-addon-internal-loader-linux-x64-musl
 node-addon-internal-loader-win32-arm64-msvc
 node-addon-internal-loader-win32-ia32-msvc
 node-addon-internal-loader-win32-x64-msvc
@@ -150,13 +154,16 @@ The supported optional prebuild target set is intentionally conservative:
 | macOS x64 (`darwin-x64`) | Supported | Supported | Supported | Supported |
 | Linux glibc arm64 (`linux-arm64-gnu`) | Supported | Supported | Supported | Supported |
 | Linux glibc x64 (`linux-x64-gnu`) | Supported | Supported | Supported | Supported |
+| Linux musl arm64 (`linux-arm64-musl`) | Supported | Supported | Supported | Supported |
+| Linux musl x64 (`linux-x64-musl`) | Supported | Supported | Supported | Supported |
 | Windows arm64 MSVC (`win32-arm64-msvc`) | Supported | Supported | Supported | Supported |
 | Windows x86 MSVC (`win32-ia32-msvc`) | Supported | Supported | No 32-bit runtime | No 32-bit runtime |
 | Windows x64 MSVC (`win32-x64-msvc`) | Supported | Supported | Supported | Supported |
 
 Both product families publish one `napi-v9` binary per supported platform,
 tested across Node 20, 22, 24, and 26. Linux GNU prebuilds require glibc 2.28 or
-newer and a `GLIBCXX_3.4.25`-compatible C++ runtime. Linux musl is not published yet.
+newer and a `GLIBCXX_3.4.25`-compatible C++ runtime. Linux musl prebuilds are built
+and tested on Alpine 3.23, including npm installs on musl Node 20/22/24/26.
 Node.js stopped shipping 32-bit Windows binaries after v22, so
 `win32-ia32-msvc` covers only Node 20 and 22.
 

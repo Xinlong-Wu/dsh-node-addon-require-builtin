@@ -9,7 +9,9 @@ const RUNNERS = {
   'darwin-arm64': 'macos-15',
   'darwin-x64': 'macos-15-intel',
   'linux-arm64-gnu': 'ubuntu-24.04-arm',
+  'linux-arm64-musl': 'ubuntu-24.04-arm',
   'linux-x64-gnu': 'ubuntu-24.04',
+  'linux-x64-musl': 'ubuntu-24.04',
   'win32-arm64-msvc': 'windows-11-vs2026-arm',
   // Keep release builds on the oldest supported hosted Windows image so a
   // runner/toolset update cannot silently raise the prebuild's OS baseline.
@@ -91,8 +93,8 @@ function platformMatrix() {
 // halves it. The prebuilt binaries themselves are per family and still built,
 // verified and uploaded separately.
 //
-// Release deliberately keeps the unaggregated matrix: publishing wants each
-// platform package's artifact produced by its own job.
+// Host release builds keep the unaggregated matrix. The Alpine builder shares
+// setup across families and still uploads one artifact per platform package.
 function ciPlatformMatrix() {
   const platforms = new Map();
   for (const family of FAMILIES) {
@@ -131,7 +133,10 @@ function hmrPlatformMatrix() {
   // runs against the whitelisted internal-loader product only.
   const family = 'internal-loader';
   return {
-    include: platformDirsFor(family).map((dir) => platformEntry(family, dir)),
+    // The HMR driver runs on the host, whose Linux Node uses glibc.
+    include: platformDirsFor(family)
+      .filter((dir) => !dir.endsWith('-musl'))
+      .map((dir) => platformEntry(family, dir)),
   };
 }
 
@@ -323,7 +328,7 @@ function distroPlatformMatrix() {
       const platform = path.basename(dir);
       // Only the glibc Linux platforms: these jobs run a distribution's own Node
       // package, which exists on Linux only.
-      if (!platform.startsWith('linux-')) continue;
+      if (!platform.startsWith('linux-') || !platform.endsWith('-gnu')) continue;
       if (platforms.has(platform)) continue;
       const entry = platformEntry(family, dir);
       platforms.set(platform, {
@@ -356,13 +361,35 @@ function distroPlatformMatrix() {
   return { include };
 }
 
+function ciMuslPlatformMatrix() {
+  return {
+    include: ciPlatformMatrix().include
+      .filter((entry) => entry.platform.endsWith('-musl'))
+      .map((entry) => {
+        const arch = entry.platform.split('-')[1];
+        return {
+          ...entry,
+          arch,
+          runner_arch: arch === 'arm64' ? 'ARM64' : 'X64',
+          docker_platform: arch === 'arm64' ? 'linux/arm64' : 'linux/amd64',
+        };
+      }),
+  };
+}
+
+function hostPlatforms(matrix) {
+  return { include: matrix.include.filter((entry) => !entry.platform.endsWith('-musl')) };
+}
+
 const target = process.argv[2];
 const matrices = {
-  'ci-platforms': ciPlatformMatrix,
+  // musl builds in Alpine rather than in the host runner's glibc environment.
+  'ci-platforms': () => hostPlatforms(ciPlatformMatrix()),
+  'ci-musl-platforms': ciMuslPlatformMatrix,
   'ci-electron-platforms': electronPlatformMatrix,
   'ci-hmr-platforms': hmrPlatformMatrix,
   'ci-distro-platforms': distroPlatformMatrix,
-  'release-platforms': platformMatrix,
+  'release-platforms': () => hostPlatforms(platformMatrix()),
 };
 
 if (!target || !matrices[target]) {

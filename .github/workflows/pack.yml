@@ -1,0 +1,51 @@
+name: Pack npm tarballs
+
+on:
+  workflow_call:
+    inputs:
+      publish:
+        type: boolean
+        default: false
+
+jobs:
+  pack:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9.15.9
+          run_install: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+          cache-dependency-path: pnpm-lock.yaml
+      - run: pnpm install --ignore-scripts --frozen-lockfile
+      - run: pnpm build:ts
+      - name: Verify release version
+        run: node scripts/verify-release.mjs
+        env:
+          RELEASE_PUBLISH: ${{ inputs.publish }}
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: prebuild-*
+          path: .cache/prebuild-artifacts
+      - name: Assemble and verify all platform payloads
+        run: |
+          node scripts/assemble-prebuilds.mjs .cache/prebuild-artifacts
+          node scripts/verify-release.mjs --prebuilds
+        env:
+          RELEASE_PUBLISH: ${{ inputs.publish }}
+      - name: Pack all release tarballs
+        run: node scripts/pack-release.mjs dist/npm
+      - name: Verify real npm install on Linux glibc
+        run: node scripts/verify-packed-install.mjs dist/npm
+        env:
+          NARB_EXPECTED_LIBC: gnu
+      - uses: actions/upload-artifact@v4
+        with:
+          name: npm-tarballs
+          path: dist/npm/*
+          if-no-files-found: error
+          retention-days: 7

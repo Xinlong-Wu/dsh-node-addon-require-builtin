@@ -65,7 +65,8 @@ prints `NODE_JS_PUBLIC_INCLUDE_DIRS=...` for the current shell.
 
 ## Musl Validation
 
-Test both products and backends on Alpine 3.23 / Node 24 with an arm64 or x64
+Test both products' optional N-API packages and nodeabi source builds on Alpine
+3.23 / Node 24 with an arm64 or x64
 Docker host (the image uses the host architecture):
 
 ```sh
@@ -76,6 +77,8 @@ docker run --rm --network none --read-only --tmpfs /tmp:rw,exec,nosuid \
 ```
 
 `/tmp` needs executable mappings for the loader's native cache.
+CI and release additionally install the packed npm tarballs on musl Node
+20/22/24/26; `release:verify-packed-install` uses a temporary local registry.
 
 ## Multi-runtime Testing
 

@@ -1,4 +1,4 @@
-# Validation only: this does not add musl packages to the release matrix.
+# Shared CI/release builder for the musl optional packages.
 # The maintained Alpine release floats within 3.23 so distro rebuilds are tested;
 # exact Node/APK versions, getter instructions and binary hashes are recorded.
 ARG ALPINE_IMAGE=public.ecr.aws/docker/library/alpine:3.23
@@ -19,7 +19,9 @@ RUN set -eu; \
     export NODE_INCLUDE_DIR="$NODE_JS_PUBLIC_INCLUDE_DIRS"; \
     for product in require-builtin internal-loader; do \
       for backend in napi nodeabi; do \
-        NARB_PRODUCT="$product" NARB_BACKEND="$backend" \
+        output=build; \
+        if [ "$backend" = napi ]; then output=prebuild; fi; \
+        NARB_PRODUCT="$product" NARB_BACKEND="$backend" NARB_BUILD_OUTPUT="$output" \
           node --import tsx scripts/build.ts; \
       done; \
     done; \
@@ -33,8 +35,10 @@ RUN set -eu; \
       cp "packages/$package/package.json" "/artifacts/packages/$package/"; \
       cp -R "packages/$package/lib" "/artifacts/packages/$package/"; \
     done; \
+    arch=$(node -p 'process.arch'); \
     for product in require-builtin internal-loader; do \
       cp -R "packages/$product/entry/build" "/artifacts/packages/$product/entry/"; \
+      cp -R "packages/$product/linux-$arch-musl" "/artifacts/packages/$product/"; \
     done; \
     mkdir -p /artifacts/node_modules /artifacts/test; \
     ln -s ../packages/loader /artifacts/node_modules/node-addon-native-custom-loader; \
@@ -47,11 +51,11 @@ RUN set -eu; \
     readelf -l /usr/bin/node > NODE_ELF.txt; \
     objdump -d --disassemble=_ZNK4node14PrincipalRealm22builtin_module_requireEv \
       /usr/bin/node > GETTER_DISASSEMBLY.txt; \
-    for binary in packages/*/entry/build/*/*/*.node; do \
+    for binary in packages/*/entry/build/*/*/*.node packages/*/linux-*-musl/prebuilt/*.node; do \
       readelf -d "$binary"; \
       readelf --version-info "$binary"; \
     done > ADDON_ELF.txt; \
-    sha256sum packages/*/entry/build/*/*/*.node > SHA256SUMS
+    sha256sum packages/*/entry/build/*/*/*.node packages/*/linux-*-musl/prebuilt/*.node > SHA256SUMS
 
 FROM ${ALPINE_IMAGE} AS runtime
 RUN apk add --no-cache nodejs libstdc++

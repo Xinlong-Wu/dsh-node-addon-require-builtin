@@ -264,67 +264,23 @@ jobs:
           if-no-files-found: error
           retention-days: 7
 
+  musl:
+    uses: ./.github/workflows/prebuild-musl.yml
+
   pack:
-    name: Pack npm tarballs
-    needs: build-and-test-napi
-    runs-on: ubuntu-24.04
-    steps:
-      - uses: actions/checkout@v4
+    needs: [build-and-test-napi, musl]
+    uses: ./.github/workflows/pack.yml
+    with:
+      publish: ${{ inputs.publish }}
 
-      - uses: pnpm/action-setup@v4
-        with:
-          version: 9.15.9
-          run_install: false
-
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 24
-          cache: pnpm
-          cache-dependency-path: pnpm-lock.yaml
-
-      - name: Install dependencies without package install scripts
-        run: pnpm install --ignore-scripts --frozen-lockfile
-
-      - name: Build TypeScript entrypoints
-        run: pnpm build:ts
-
-      - name: Verify release version
-        run: node ./scripts/verify-release.mjs
-        env:
-          RELEASE_PUBLISH: ${{ inputs.publish }}
-
-      - name: Download prebuild artifacts
-        uses: actions/download-artifact@v4
-        with:
-          pattern: prebuild-*
-          path: .release/prebuild-artifacts
-
-      - name: Assemble and verify prebuilds
-        run: node ./scripts/assemble-prebuilds.mjs .release/prebuild-artifacts
-
-      - name: Verify release payload
-        run: node ./scripts/verify-release.mjs --prebuilds
-        env:
-          RELEASE_PUBLISH: ${{ inputs.publish }}
-
-      - name: Pack release tarballs
-        run: node ./scripts/pack-release.mjs dist/npm
-
-      - name: Verify packed install
-        run: node ./scripts/verify-packed-install.mjs dist/npm
-
-      - name: Upload npm tarballs
-        uses: actions/upload-artifact@v4
-        with:
-          name: npm-tarballs
-          path: dist/npm/*
-          if-no-files-found: error
-          retention-days: 7
+  packed-musl:
+    needs: pack
+    uses: ./.github/workflows/packed-musl.yml
 
   publish:
     name: Publish to npm
     if: inputs.publish
-    needs: pack
+    needs: [pack, packed-musl]
     runs-on: ubuntu-24.04
     environment: npm-publish
     permissions:

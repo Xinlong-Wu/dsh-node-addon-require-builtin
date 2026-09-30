@@ -47,6 +47,8 @@ matrix:
 | `darwin-x64` | Supported | Supported | Supported | Supported |
 | `linux-arm64-gnu` | Supported | Supported | Supported | Supported |
 | `linux-x64-gnu` | Supported | Supported | Supported | Supported |
+| `linux-arm64-musl` | Supported | Supported | Supported | Supported |
+| `linux-x64-musl` | Supported | Supported | Supported | Supported |
 | `win32-arm64-msvc` | Supported | Supported | Supported | Supported |
 | `win32-ia32-msvc` | Supported | Supported | No 32-bit runtime | No 32-bit runtime |
 | `win32-x64-msvc` | Supported | Supported | Supported | Supported |
@@ -108,16 +110,16 @@ Published backend artifacts for each product family:
 | `darwin-x64` | `napi-v9` |
 | `linux-arm64-gnu` | `napi-v9` |
 | `linux-x64-gnu` | `napi-v9` |
+| `linux-arm64-musl` | `napi-v9` |
+| `linux-x64-musl` | `napi-v9` |
 | `win32-arm64-msvc` | `napi-v9` |
 | `win32-ia32-msvc` | `napi-v9` |
 | `win32-x64-msvc` | `napi-v9` |
 
-Not published yet:
-
-| Platform suffix | Reason |
-|---|---|
-| `linux-arm64-musl` | Alpine 3.23 / Node 24 source-build validation; optional packaging pending |
-| `linux-x64-musl` | Alpine 3.23 / Node 24 source-build validation; optional packaging pending |
+Musl prebuilds use Alpine 3.23. CI and release share the Alpine build workflow,
+then install the packed entry packages through npm on native arm64/x64 runners
+with musl Node 20, 22, 24 and 26. The loader must resolve the matching optional
+package with local builds disabled; missing and wrong-product binaries are rejected.
 
 Supported platform packages are exercised in CI with N-API optional prebuild
 builds across supported Node majors, both product families, optional package
