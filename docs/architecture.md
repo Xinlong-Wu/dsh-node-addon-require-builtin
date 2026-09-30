@@ -183,8 +183,8 @@ Implemented parser families:
 
 - macOS arm64
 - macOS x64
-- Linux glibc arm64
-- Linux glibc x64
+- Linux arm64 (glibc and musl)
+- Linux x64 (glibc and musl)
 - Windows arm64
 - Windows x64
 - Windows x86 (`ia32`, Node 20/22 only — Node ships no 32-bit Windows runtime after v22)

@@ -656,6 +656,55 @@ jobs:
           done
           exit $status
 
+  musl:
+    name: 'musl: Alpine 3.23 / ${{ matrix.arch }} / Node 24'
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: arm64
+            runner: ubuntu-24.04-arm
+            runner_arch: ARM64
+            platform: linux/arm64
+          - arch: x64
+            runner: ubuntu-24.04
+            runner_arch: X64
+            platform: linux/amd64
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build musl binaries and runtime-only validation image
+        run: |
+          test "$RUNNER_ARCH" = '${{ matrix.runner_arch }}'
+          docker build --platform '${{ matrix.platform }}' --progress plain \
+            -f scripts/musl.Dockerfile -t narb-musl-validation .
+
+      - name: Collect binaries and build evidence
+        run: |
+          mkdir -p .cache/musl
+          container=$(docker create narb-musl-validation)
+          trap 'docker rm "$container"' EXIT
+          docker cp "$container:/workspace/." .cache/musl/
+
+      - name: Test unchanged binaries without build tools or network
+        shell: bash
+        run: |
+          # The native cache in /tmp needs executable mappings for dlopen.
+          docker run --rm --network none --read-only --tmpfs /tmp:rw,exec,nosuid \
+            --platform '${{ matrix.platform }}' --env NARB_EXPECTED_ARCH=${{ matrix.arch }} \
+            narb-musl-validation 2>&1 | tee .cache/musl-validation.log
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: validation-linux-${{ matrix.arch }}-musl-node24
+          path: |
+            .cache/musl/
+            .cache/musl-validation.log
+          include-hidden-files: true
+          if-no-files-found: warn
+
   hmr-comparison:
     name: 'HMR Test: ${{ matrix.family }} / ${{ matrix.platform }}'
     needs:

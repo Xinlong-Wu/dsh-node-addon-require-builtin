@@ -114,8 +114,8 @@ Not published yet:
 
 | Platform suffix | Reason |
 |---|---|
-| `linux-arm64-musl` | musl getter parser not implemented |
-| `linux-x64-musl` | musl getter parser not implemented |
+| `linux-arm64-musl` | Alpine 3.23 / Node 24 source-build validation; optional packaging pending |
+| `linux-x64-musl` | Alpine 3.23 / Node 24 source-build validation; optional packaging pending |
 
 Supported platform packages are exercised in CI with N-API optional prebuild
 builds across supported Node majors, both product families, optional package

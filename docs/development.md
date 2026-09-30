@@ -63,6 +63,20 @@ pnpm test:backends
 The header helper downloads official archives from Node's release server and
 prints `NODE_JS_PUBLIC_INCLUDE_DIRS=...` for the current shell.
 
+## Musl Validation
+
+Test both products and backends on Alpine 3.23 / Node 24 with an arm64 or x64
+Docker host (the image uses the host architecture):
+
+```sh
+docker build --progress plain \
+  -f scripts/musl.Dockerfile -t narb-musl-validation .
+docker run --rm --network none --read-only --tmpfs /tmp:rw,exec,nosuid \
+  narb-musl-validation
+```
+
+`/tmp` needs executable mappings for the loader's native cache.
+
 ## Multi-runtime Testing
 
 ```sh
