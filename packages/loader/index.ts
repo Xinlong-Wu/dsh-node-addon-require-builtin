@@ -442,7 +442,15 @@ function prebuildCandidateBinaries(
   return [nodeAbiBinary, napiBinary].filter((binary): binary is PrebuiltBinary => Boolean(binary));
 }
 
-function validateLoadedBinding(binding: NativeBinding, bindingPath: string): NativeBinding {
+function productForPackage(packageName: string): string {
+  for (const product of ['require-builtin', 'internal-loader']) {
+    const prefix = `node-addon-${product}`;
+    if (packageName === prefix || packageName.startsWith(`${prefix}-`)) return product;
+  }
+  throw new Error(`unknown native product package: ${packageName}`);
+}
+
+function validateLoadedBinding(binding: NativeBinding, bindingPath: string, product: string): NativeBinding {
   if (!binding) {
     throw new Error(`native binding did not export an object: ${bindingPath}`);
   }
@@ -463,10 +471,15 @@ function validateLoadedBinding(binding: NativeBinding, bindingPath: string): Nat
   }
   if (
     typeof info.mode !== 'string' ||
+    typeof info.product !== 'string' ||
     typeof info.backend !== 'string' ||
     typeof info.abi !== 'string'
   ) {
     throw new Error(`native binding info has invalid fields: ${bindingPath}`);
+  }
+
+  if (info.product !== product) {
+    throw new Error(`native binding product mismatch for ${bindingPath}: expected ${product}, got ${info.product}`);
   }
 
   const backend = info.backend;
@@ -493,8 +506,9 @@ function validatePrebuiltBinding(
   binding: NativeBinding,
   binary: PrebuiltBinary,
   bindingPath: string,
+  product: string,
 ): NativeBinding {
-  validateLoadedBinding(binding, bindingPath);
+  validateLoadedBinding(binding, bindingPath, product);
   const info = binding.nativeBindingInfo;
   if (!info || info.backend !== binary.backend || info.abi !== binary.abi) {
     const actualBackend = info && info.backend;
@@ -542,7 +556,7 @@ export function loadPrebuild(
     let loadPath = bindingPath;
     try {
       loadPath = materializedNativeBinaryPath(bindingPath, packageName);
-      return validatePrebuiltBinding(require(loadPath) as NativeBinding, binary, loadPath);
+      return validatePrebuiltBinding(require(loadPath) as NativeBinding, binary, loadPath, productForPackage(packageName));
     } catch (error) {
       attempts.push({
         path: bindingPath,
@@ -559,7 +573,7 @@ export function loadPrebuild(
   throw error;
 }
 
-function tryRequirePackage(candidate: { request: string; source: string }): {
+function tryRequirePackage(candidate: { request: string; source: string }, product: string): {
   binding: NativeBinding | null;
   path: string | null;
   error: unknown;
@@ -567,14 +581,14 @@ function tryRequirePackage(candidate: { request: string; source: string }): {
   try {
     const binding = require(candidate.request) as NativeBinding;
     const bindingPath = binding.bindingPath || require.resolve(candidate.request);
-    validateLoadedBinding(binding, bindingPath);
+    validateLoadedBinding(binding, bindingPath, product);
     return { binding, path: bindingPath, error: null };
   } catch (error) {
     return { binding: null, path: null, error };
   }
 }
 
-function tryRequireLocal(packageDir: string, binary: PrebuiltBinary): {
+function tryRequireLocal(packageDir: string, binary: PrebuiltBinary, product: string): {
   binding: NativeBinding | null;
   path: string;
   loadPath?: string;
@@ -591,7 +605,7 @@ function tryRequireLocal(packageDir: string, binary: PrebuiltBinary): {
   try {
     const loadPath = materializedNativeBinaryPath(file, 'node-addon-native-custom-loader-local');
     const binding = require(loadPath) as NativeBinding;
-    validateLoadedBinding(binding, loadPath);
+    validateLoadedBinding(binding, loadPath, product);
     Object.defineProperty(binding, 'bindingPath', {
       value: loadPath,
       enumerable: false,
@@ -648,6 +662,7 @@ function optionalPackageCandidates(
 export function loadEntry(options: LoadEntryOptions): LoadedBinding {
   const packageDir = options.packageDir;
   const packagePrefix = options.packagePrefix;
+  const product = productForPackage(packagePrefix);
   const backendPreference = normalizeBackend(
     options.backend || process.env.NARB_BACKEND,
   );
@@ -655,7 +670,7 @@ export function loadEntry(options: LoadEntryOptions): LoadedBinding {
 
   if (process.env.NARB_DISABLE_OPTIONAL_PACKAGE !== '1') {
     for (const candidate of optionalPackageCandidates(packageDir, packagePrefix)) {
-      const result = tryRequirePackage(candidate);
+      const result = tryRequirePackage(candidate, product);
       if (result.binding && result.path) {
         return {
           binding: result.binding,
@@ -677,7 +692,7 @@ export function loadEntry(options: LoadEntryOptions): LoadedBinding {
   }
 
   for (const binary of entryCandidateBinaries(backendPreference)) {
-    const result = tryRequireLocal(packageDir, binary);
+    const result = tryRequireLocal(packageDir, binary, product);
     if (result.binding) {
       return {
         binding: result.binding,
