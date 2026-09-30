@@ -71,6 +71,11 @@ jobs:
       - name: Build TypeScript entrypoints
         run: pnpm build:ts
 
+      - name: Select VS2022-compatible ARM64 toolchain
+        if: matrix.platform == 'win32-arm64-msvc'
+        shell: pwsh
+        run: ./scripts/prepare-windows-arm64-toolchain.ps1
+
       - name: Typecheck
         run: pnpm typecheck
 
@@ -98,7 +103,7 @@ jobs:
             echo "::endgroup::"
           done
         env:
-          npm_config_msvs_version: ${{ runner.os == 'Windows' && '2022' || '' }}
+          npm_config_msvs_version: ${{ matrix.platform == 'win32-arm64-msvc' && env.npm_config_msvs_version || runner.os == 'Windows' && '2022' || '' }}
 
       - name: Build and test N-API prebuild on glibc 2.28
         if: runner.os == 'Linux'

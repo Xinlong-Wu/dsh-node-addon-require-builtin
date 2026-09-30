@@ -10,7 +10,7 @@ const RUNNERS = {
   'darwin-x64': 'macos-15-intel',
   'linux-arm64-gnu': 'ubuntu-24.04-arm',
   'linux-x64-gnu': 'ubuntu-24.04',
-  'win32-arm64-msvc': 'windows-11-arm',
+  'win32-arm64-msvc': 'windows-11-vs2026-arm',
   // Keep release builds on the oldest supported hosted Windows image so a
   // runner/toolset update cannot silently raise the prebuild's OS baseline.
   'win32-ia32-msvc': 'windows-2022',

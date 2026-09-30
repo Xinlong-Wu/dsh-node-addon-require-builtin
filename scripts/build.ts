@@ -272,9 +272,15 @@ function buildWithNodeGyp(): void {
   const nodeGyp = require.resolve('node-gyp/bin/node-gyp.js', {
     paths: [packageRoot, root],
   });
+  const msvcVersion = process.env.NARB_MSVC_VERSION;
+  if (msvcVersion && (process.arch !== 'arm64' || !/^14\.44\.\d+$/.test(msvcVersion))) {
+    throw new Error('NARB_MSVC_VERSION must select MSVC 14.44 on Windows ARM64');
+  }
   const gypArgs = [
     nodeGyp,
-    'rebuild',
+    // node-gyp build cannot forward MSBuild /p: arguments. Configure with the
+    // installed VS host, then apply the pinned toolset to the entire solution.
+    ...(msvcVersion ? ['clean', 'configure'] : ['rebuild']),
     '--enable-lto=false',
     '--enable-thin-lto=false',
     '--lto-jobs=',
@@ -302,6 +308,8 @@ function buildWithNodeGyp(): void {
     process.exit(result.status ?? 1);
   }
 
+  if (msvcVersion) buildWithPinnedArm64Toolchain(msvcVersion);
+
   const gypOutput = path.join(packageRoot, 'build', 'Release', BINARY_NAME);
   if (!fs.existsSync(gypOutput)) {
     throw new Error(`node-gyp output not found: ${gypOutput}`);
@@ -309,6 +317,70 @@ function buildWithNodeGyp(): void {
   fs.mkdirSync(outDir, { recursive: true });
   fs.copyFileSync(gypOutput, output);
   console.log(`Copied ${relativePathForLog(root, gypOutput)} -> ${relativePathForLog(root, output)}`);
+}
+
+function buildWithPinnedArm64Toolchain(msvcVersion: string): void {
+  const sdkVersion = process.env.NARB_WINDOWS_SDK_VERSION;
+  if (sdkVersion !== '10.0.26100.0') {
+    throw new Error('the pinned ARM64 toolchain requires Windows SDK 10.0.26100.0');
+  }
+  const config = JSON.parse(fs.readFileSync(
+    path.join(packageRoot, 'build', 'config.gypi'), 'utf8',
+  ).replace(/^#.*$/gm, '')) as { variables: { msbuild_path?: string } };
+  const msbuild = config.variables.msbuild_path;
+  if (!msbuild || !fs.existsSync(msbuild)) {
+    throw new Error('node-gyp did not select a usable MSBuild executable');
+  }
+  const properties = [
+    '/p:Configuration=Release',
+    '/p:Platform=ARM64',
+    '/p:PlatformToolset=v143',
+    `/p:VCToolsVersion=${msvcVersion}`,
+    `/p:WindowsTargetPlatformVersion=${sdkVersion}`,
+    '/p:PreferredToolArchitecture=arm64',
+    '/nodeReuse:false',
+    '/nologo',
+  ];
+
+  // Evaluate after all project imports. Merely setting environment variables
+  // would let node-gyp's generated v145 project silently override the pin.
+  const evaluation = spawnSync(msbuild, [
+    'build/require_builtin.vcxproj',
+    ...properties,
+    '-getProperty:PlatformToolset,VCToolsVersion,VCToolsInstallDir,WindowsTargetPlatformVersion',
+    '-getItem:ClCompile',
+  ], { cwd: packageRoot, encoding: 'utf8', maxBuffer: 8 * 1024 * 1024 });
+  if (evaluation.error) throw evaluation.error;
+  if (evaluation.status !== 0) {
+    process.stdout.write(evaluation.stdout);
+    process.stderr.write(evaluation.stderr);
+    process.exit(evaluation.status ?? 1);
+  }
+  const evaluated = JSON.parse(evaluation.stdout) as {
+    Properties: Record<string, string>;
+    Items: { ClCompile: Array<{ Identity: string; RuntimeLibrary: string }> };
+  };
+  const selected = evaluated.Properties;
+  if (selected.PlatformToolset !== 'v143' ||
+      selected.VCToolsVersion !== msvcVersion ||
+      path.basename(path.resolve(selected.VCToolsInstallDir)) !== msvcVersion ||
+      selected.WindowsTargetPlatformVersion !== sdkVersion) {
+    throw new Error(`MSBuild changed the pinned toolchain: ${JSON.stringify(selected)}`);
+  }
+  if (!evaluated.Items.ClCompile.length || evaluated.Items.ClCompile.some(
+    (item) => item.RuntimeLibrary !== 'MultiThreaded',
+  )) {
+    throw new Error('the pinned ARM64 build must use the static Release CRT (/MT)');
+  }
+  console.log(`Verified ARM64 toolchain: ${JSON.stringify(selected)}; RuntimeLibrary=/MT`);
+
+  // Global properties also cover dependency projects (including node-addon-api),
+  // so no v145 objects or runtime libraries enter a v143-linked addon.
+  const build = spawnSync(msbuild, [
+    'build/binding.sln', ...properties, '/verbosity:normal',
+  ], { cwd: packageRoot, stdio: 'inherit' });
+  if (build.error) throw build.error;
+  if (build.status !== 0) process.exit(build.status ?? 1);
 }
 
 function main(): void {

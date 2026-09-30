@@ -95,8 +95,10 @@ across an optimization and hardening matrix, plus bytes read out of shipped
 binaries; see `scripts/collect-getter-fixtures.mjs`.
 
 Windows x64 and x86 prebuilds are built and tested on the Windows Server 2022
-runner; ARM64 uses the Windows 11 ARM runner. All Windows builds pin Visual
-Studio 2022 and CI rejects dynamic MSVC/UCRT runtime dependencies.
+runner with VS2022; ARM64 uses the Windows 11 VS2026 runner with the older
+MSVC 14.44/v143 toolset and Windows SDK 10.0.26100.0 explicitly selected.
+CI verifies the ARM64 toolchain and static CRT selection, and rejects dynamic
+MSVC/UCRT runtime dependencies on all Windows targets.
 
 Published backend artifacts for each product family:
 
