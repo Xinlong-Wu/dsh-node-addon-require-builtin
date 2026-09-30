@@ -226,6 +226,7 @@ function electronPlatformMatrix() {
 const DISTROS = [
   {
     id: 'fedora-44',
+    libc: 'glibc',
     image: 'registry.fedoraproject.org/fedora:44',
     streams: [20, 22, 24],
     install: 'dnf install -y --setopt=install_weak_deps=False nodejs$V binutils',
@@ -234,6 +235,7 @@ const DISTROS = [
   },
   {
     id: 'fedora-rawhide',
+    libc: 'glibc',
     image: 'registry.fedoraproject.org/fedora:rawhide',
     // Where Node 26 landed first (nodejs26-26.3.1-5.fc45). Rolling by
     // definition, so its churn warns rather than fails.
@@ -244,6 +246,7 @@ const DISTROS = [
   },
   {
     id: 'debian-13',
+    libc: 'glibc',
     image: 'docker.io/library/debian:trixie',
     // trixie ships Node 20.19.2, confirmed via sources.debian.org, and its
     // getter bytes were read out of the packaged libnode115.
@@ -258,6 +261,7 @@ const DISTROS = [
   },
   {
     id: 'rocky-9',
+    libc: 'glibc',
     image: 'quay.io/rockylinux/rockylinux:9',
     // RHEL 9's default nodejs is 16, below this project's floor, so the module
     // stream is selected explicitly. Its packaged aarch64 libnode was measured
@@ -272,6 +276,7 @@ const DISTROS = [
   },
   {
     id: 'almalinux-9',
+    libc: 'glibc',
     image: 'quay.io/almalinuxorg/almalinux:9',
     streams: [20, 22],
     install: 'dnf module install -y nodejs:$V && dnf install -y binutils',
@@ -280,6 +285,7 @@ const DISTROS = [
   },
   {
     id: 'amazonlinux-2023',
+    libc: 'glibc',
     image: 'public.ecr.aws/amazonlinux/amazonlinux:2023',
     // Its default nodejs is 18 and, more importantly, statically linked with no
     // shared libnode, so the private getter symbol is not exported and the probe
@@ -293,6 +299,7 @@ const DISTROS = [
   },
   {
     id: 'opensuse-leap-15',
+    libc: 'glibc',
     image: 'registry.opensuse.org/opensuse/leap:15.6',
     // Passing already; kept optional until a couple of runs confirm stability.
     streams: ['default'],
@@ -302,7 +309,8 @@ const DISTROS = [
   },
   {
     id: 'ubuntu-2604',
-    image: 'public.ecr.aws/ubuntu/ubuntu:26.04',
+    libc: 'glibc',
+    image: 'docker.io/library/ubuntu:26.04',
     // 24.04 was measured and deliberately skipped: no branch protection and its
     // Node is 18. This entry only pays off if 26.04 ships Node 20 or newer,
     // hence optional.
@@ -311,6 +319,16 @@ const DISTROS = [
       'DEBIAN_FRONTEND=noninteractive apt-get update -qq && DEBIAN_FRONTEND=noninteractive apt-get install -y -qq --no-install-recommends nodejs binutils',
     binary: '/usr/bin/node',
     probe: 'dpkg -S "$node_bin"',
+  },
+  {
+    id: 'alpine-3.23',
+    libc: 'musl',
+    image: 'docker.io/library/alpine:3.23',
+    shell: 'sh',
+    streams: ['default'],
+    install: 'apk add --no-cache nodejs binutils',
+    binary: '/usr/bin/node',
+    probe: 'apk list --installed nodejs musl',
   },
 ];
 
@@ -326,13 +344,12 @@ function distroPlatformMatrix() {
   for (const family of FAMILIES) {
     for (const dir of platformDirsFor(family)) {
       const platform = path.basename(dir);
-      // Only the glibc Linux platforms: these jobs run a distribution's own Node
-      // package, which exists on Linux only.
-      if (!platform.startsWith('linux-') || !platform.endsWith('-gnu')) continue;
+      if (!platform.startsWith('linux-')) continue;
       if (platforms.has(platform)) continue;
       const entry = platformEntry(family, dir);
       platforms.set(platform, {
         platform,
+        libc: platform.endsWith('-musl') ? 'musl' : 'glibc',
         runner: entry.runner,
         build_node: entry.build_node,
       });
@@ -342,6 +359,7 @@ function distroPlatformMatrix() {
   const include = [];
   for (const base of platforms.values()) {
     for (const distro of DISTROS) {
+      if (distro.libc !== base.libc) continue;
       include.push({
         ...base,
         // Space separated so the job can iterate these in shell.
@@ -351,6 +369,7 @@ function distroPlatformMatrix() {
         artifact_pattern: `prebuild-*-${base.platform}-napi-v9`,
         distro: distro.id,
         distro_image: distro.image,
+        distro_shell: distro.shell || 'bash',
         distro_streams: distro.streams.join(' '),
         distro_install: distro.install,
         distro_binary: distro.binary,

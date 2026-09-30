@@ -267,6 +267,10 @@ jobs:
   musl:
     uses: ./.github/workflows/prebuild-musl.yml
 
+  distro-node:
+    needs: [build-and-test-napi, musl]
+    uses: ./.github/workflows/distro-node.yml
+
   pack:
     needs: [build-and-test-napi, musl]
     uses: ./.github/workflows/pack.yml
@@ -280,7 +284,7 @@ jobs:
   publish:
     name: Publish to npm
     if: inputs.publish
-    needs: [pack, packed-musl]
+    needs: [pack, packed-musl, distro-node]
     runs-on: ubuntu-24.04
     environment: npm-publish
     permissions:

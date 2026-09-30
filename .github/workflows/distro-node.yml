@@ -1,0 +1,167 @@
+name: Distro Node
+
+on:
+  workflow_call:
+
+jobs:
+  matrix:
+    runs-on: ubuntu-24.04
+    outputs:
+      distro_platforms: ${{ steps.matrix.outputs.platforms }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: matrix
+        run: echo "platforms=$(node scripts/github-matrix.mjs ci-distro-platforms)" >> "$GITHUB_OUTPUT"
+
+  distro-node:
+    name: 'Distro Node: ${{ matrix.platform }} / ${{ matrix.distro }}'
+    needs:
+      - matrix
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJson(needs.matrix.outputs.distro_platforms) }}
+    env:
+      NARB_TRACE: 1
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9.15.9
+          run_install: false
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.build_node }}
+          cache: pnpm
+          cache-dependency-path: pnpm-lock.yaml
+
+      - name: Install dependencies without package install scripts
+        run: pnpm install --ignore-scripts --frozen-lockfile
+
+      - name: Build TypeScript entrypoints
+        run: pnpm build:ts
+
+      - name: Download N-API prebuilds for every family
+        uses: actions/download-artifact@v4
+        with:
+          pattern: ${{ matrix.artifact_pattern }}
+          path: /tmp/prebuilds
+
+      - name: Place prebuilds and show what was downloaded
+        shell: bash
+        run: |
+          for family in ${{ matrix.families }}; do
+            src="/tmp/prebuilds/prebuild-$family-${{ matrix.platform }}-napi-v9"
+            dst="packages/$family/${{ matrix.platform }}/prebuilt"
+            mkdir -p "$dst"
+            cp "$src"/* "$dst/"
+            ls -l "$dst"
+          done
+
+      # A distribution's Node is a different binary, not just a different version:
+      # usually a thin /usr/bin/node against a shared libnode.so, built with
+      # hardening flags the nodejs.org binaries do not use. Measured so far: Fedora
+      # combines `-mbranch-protection=standard` with `-mno-omit-leaf-frame-pointer`,
+      # which gives even the private getter the probe decodes both pointer
+      # authentication and a frame record (28 bytes); Debian enables branch
+      # protection but without +leaf, so its getter stays `bti c; ldr; ret`
+      # (12 bytes). The shape follows each distribution's own flags, so the decoder
+      # is exercised against real packaged binaries.
+      #
+      # Install command, binary path and version query come from the matrix because
+      # package managers and layouts differ. One container per Node stream, since
+      # only Fedora installs streams in parallel; both families are tested inside
+      # it, and a failing combination does not stop the others so one run reports
+      # everything.
+      #
+      # Image tags pin a maintained release but float within it on purpose: a
+      # rebuild that changes compiler flags is exactly the regression this job
+      # exists to catch, so exact package versions are logged rather than pinned.
+      - name: Test prebuilds against ${{ matrix.distro }}
+        shell: bash
+        run: |
+          case "$RUNNER_ARCH" in
+            X64) expect_arch=x86_64 ;;
+            ARM64) expect_arch=aarch64 ;;
+            *) echo "unsupported Linux runner architecture: $RUNNER_ARCH" >&2; exit 1 ;;
+          esac
+
+          bash scripts/pull-container.sh "${{ matrix.distro_image }}"
+          status=0
+          for stream in ${{ matrix.distro_streams }}; do
+            echo "::group::${{ matrix.distro }} / node stream $stream"
+            docker run --rm --pull=never \
+              --env NARB_BACKEND=napi \
+              --env NARB_EXPECTED_BACKEND=napi \
+              --env NARB_DISABLE_LOCAL_BUILD=1 \
+              --env NARB_TRACE \
+              --env "EXPECT_ARCH=$expect_arch" \
+              --env "EXPECT_PLATFORM=${{ matrix.platform }}" \
+              --env "V=$stream" \
+              --env "FAMILIES=${{ matrix.families }}" \
+              --env 'INSTALL=${{ matrix.distro_install }}' \
+              --env 'BINARY=${{ matrix.distro_binary }}' \
+              --env 'PROBE=${{ matrix.distro_probe }}' \
+              --volume "$GITHUB_WORKSPACE:/workspace:ro" \
+              --workdir /workspace \
+              "${{ matrix.distro_image }}" \
+              ${{ matrix.distro_shell }} -ceu '
+                test "$(uname -m)" = "$EXPECT_ARCH"
+
+                # These are templates from scripts/github-matrix.mjs, not external
+                # input; eval is what expands $V and $node_bin inside them. Nothing
+                # here is tolerated failing: a package that cannot be installed or
+                # identified means the job is not testing what it claims to.
+                eval "$INSTALL" >/dev/null
+                node_bin=$(eval echo "$BINARY")
+                eval "$PROBE"
+                "$node_bin" -v
+                "$node_bin" -e "
+                  const loader = require(\"./packages/loader/lib/index.js\");
+                  if (loader.platformPackageSuffix() !== process.env.EXPECT_PLATFORM) {
+                    throw new Error(\"distro libc/architecture does not match the prebuild\");
+                  }
+                "
+
+                # Record the branch-protection census of the image that actually
+                # contains V8. Which distributions harden their builds is a
+                # measured property of their flags, so it is logged rather than
+                # assumed. A statically linked Node has no shared libnode but can
+                # still export the private symbol (the Rocky nodejs:20 stream and
+                # openSUSE both do), so the census falls back to the interpreter
+                # itself rather than being skipped.
+                # ldd exits non-zero on a static binary; that is the case handled
+                # just below, not an error to propagate.
+                lib=$(ldd "$node_bin" | awk "/libnode\.so/ {print \$3; exit}" || true)
+                if [ -n "$lib" ]; then
+                  echo "libnode: $lib"
+                else
+                  echo "libnode: none (statically linked); censusing $node_bin"
+                  lib="$node_bin"
+                fi
+                objdump -d "$lib" > /tmp/dis.txt
+                # grep -c exits 1 when a count is legitimately zero, which is a
+                # result rather than a failure.
+                printf "hardening: paciasp=%s bti_c=%s endbr64=%s retaa=%s\n" \
+                  "$(grep -c "\bpaciasp\b" /tmp/dis.txt || true)" \
+                  "$(grep -c "\bbti\s*c\b" /tmp/dis.txt || true)" \
+                  "$(grep -c "\bendbr64\b" /tmp/dis.txt || true)" \
+                  "$(grep -c "\breta[ab]\b" /tmp/dis.txt || true)"
+
+                # NARB_TRACE is on, so a decode failure prints the probe trace and
+                # both decode stages reasons, and a binding-resolution failure
+                # prints every attempted path.
+                rc=0
+                for family in $FAMILIES; do
+                  echo "--- $family ---"
+                  export NARB_PRODUCT="$family"
+                  "$node_bin" ./test/backend.test.js || rc=1
+                  "$node_bin" --expose-internals ./test/require-parity.test.js || rc=1
+                done
+                exit $rc
+              ' || status=1
+            echo "::endgroup::"
+          done
+          exit $status

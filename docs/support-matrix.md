@@ -120,6 +120,8 @@ Musl prebuilds use Alpine 3.23. CI and release share the Alpine build workflow,
 then install the packed entry packages through npm on native arm64/x64 runners
 with musl Node 20, 22, 24 and 26. The loader must resolve the matching optional
 package with local builds disabled; missing and wrong-product binaries are rejected.
+Alpine's own `apk` Node package also runs in the mandatory distro matrix on both
+architectures, consuming the musl prebuild artifacts without rebuilding them.
 
 Supported platform packages are exercised in CI with N-API optional prebuild
 builds across supported Node majors, both product families, optional package

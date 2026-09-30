@@ -4,21 +4,22 @@ on:
   workflow_call:
 
 jobs:
+  matrix:
+    runs-on: ubuntu-24.04
+    outputs:
+      platforms: ${{ steps.matrix.outputs.platforms }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: matrix
+        run: echo "platforms=$(node scripts/github-matrix.mjs ci-musl-platforms)" >> "$GITHUB_OUTPUT"
+
   install:
-    name: 'npm install: musl / ${{ matrix.arch }} / Node 20-26'
+    name: 'npm install: musl / ${{ matrix.arch }} / Node 20/22/24/26'
     runs-on: ${{ matrix.runner }}
+    needs: matrix
     strategy:
       fail-fast: false
-      matrix:
-        include:
-          - arch: arm64
-            runner: ubuntu-24.04-arm
-            runner_arch: ARM64
-            platform: linux/arm64
-          - arch: x64
-            runner: ubuntu-24.04
-            runner_arch: X64
-            platform: linux/amd64
+      matrix: ${{ fromJson(needs.matrix.outputs.platforms) }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/download-artifact@v4
@@ -32,11 +33,17 @@ jobs:
           status=0
           for major in 20 22 24 26; do
             echo "::group::Node $major / musl / ${{ matrix.arch }}"
-            docker run --rm --platform '${{ matrix.platform }}' \
+            image="docker.io/library/node:$major-alpine3.23"
+            if ! bash scripts/pull-container.sh "$image" --platform '${{ matrix.docker_platform }}'; then
+              status=1
+              echo "::endgroup::"
+              continue
+            fi
+            docker run --rm --pull=never --platform '${{ matrix.docker_platform }}' \
               --network none --read-only --tmpfs /tmp:rw,exec,nosuid \
               --env NARB_EXPECTED_ARCH=${{ matrix.arch }} --env NARB_EXPECTED_LIBC=musl \
               --volume "$GITHUB_WORKSPACE:/workspace:ro" --workdir /workspace \
-              "public.ecr.aws/docker/library/node:$major-alpine3.23" \
+              "$image" \
               node scripts/verify-packed-install.mjs dist/npm || status=1
             echo "::endgroup::"
           done
