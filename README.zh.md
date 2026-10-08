@@ -150,7 +150,7 @@ pnpm test:optional
 Node.js 在 v22 之后停止提供 32 位 Windows 二进制文件，因此 `win32-ia32-msvc`
 仅覆盖 Node 20 和 22。
 
-两个产品还会在 Electron 43.0.0、44.0.0 和 45.0.0-alpha.6 的真实主进程中进行测试。
+两个产品还会在 Electron 43.0.0、44.0.0、44.7.0 和 45.0.0-alpha.6 的真实主进程中进行测试。
 Electron 测试矩阵覆盖 macOS arm64/x64、Linux glibc arm64/x64 和 Windows arm64/x64。
 Electron 43 额外覆盖 Windows ia32；后续版本不再发布 ia32 二进制文件。
 其他 Electron 版本在完成分析并被明确加入支持范围之前，都会被拒绝使用。

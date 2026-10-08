@@ -83,6 +83,12 @@ int main() {
       0,
       "electron-44 tagged default=0");
   ExpectProfile(
+      "Electron 44.7 native fingerprint",
+      {24, 21, 0, "15.2.124.28-electron.0"},
+      narb::EmbedderDataAbi::kTagged,
+      0,
+      "electron-44.7 tagged default=0");
+  ExpectProfile(
       "Electron 45 native fingerprint",
       {24, 21, 0, "15.4.80-electron.0"},
       narb::EmbedderDataAbi::kTagged,
@@ -95,6 +101,13 @@ int main() {
   ExpectUnsupported(
       "known Electron V8 with wrong native Node version",
       {24, 21, 1, "15.4.80-electron.0"});
+
+  ExpectUnsupported(
+      "Electron 44.7 V8 with wrong native Node version",
+      {24, 21, 1, "15.2.124.28-electron.0"});
+  ExpectUnsupported(
+      "Electron 44.7 Node with unknown V8 version",
+      {24, 21, 0, "15.2.124.29-electron.0"});
 
   std::cout << "\nAll runtime-profile cases passed.\n";
   return 0;

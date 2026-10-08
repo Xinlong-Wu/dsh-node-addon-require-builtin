@@ -169,7 +169,7 @@ and tested on Alpine 3.23, including npm installs on musl Node 20/22/24/26.
 Node.js stopped shipping 32-bit Windows binaries after v22, so
 `win32-ia32-msvc` covers only Node 20 and 22.
 
-Electron 43.0.0, 44.0.0, and 45.0.0-alpha.6 are also tested in real main
+Electron 43.0.0, 44.0.0, 44.7.0, and 45.0.0-alpha.6 are also tested in real main
 processes for both products. The Electron matrix covers macOS arm64/x64, Linux
 glibc arm64/x64, and Windows arm64/x64. Electron 43 additionally covers Windows
 ia32; later releases do not publish an ia32 binary. Other Electron versions

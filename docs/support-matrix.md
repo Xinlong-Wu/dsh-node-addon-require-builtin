@@ -28,6 +28,7 @@ Node release with a newer V8 ABI than upstream Node uses.
 |---|---|---|---|---|---|---|
 | 43.0.0 | 24.17.0 | 15.0.245.13-electron.0 | Supported | Supported | Supported | Supported |
 | 44.0.0 | 24.18.1 | 15.2.124.13-electron.0 | Supported | Supported | Supported | No official binary |
+| 44.7.0 | 24.21.0 | 15.2.124.28-electron.0 | Supported | Supported | Supported | No official binary |
 | 45.0.0-alpha.6 | 24.21.0 | 15.4.80-electron.0 | Supported | Supported | Supported | No official binary |
 
 Each supported cell runs both `require-builtin` and `internal-loader` in a real
