@@ -112,10 +112,10 @@ The workflow builds the full set declared by every
 then publishes only from the final tarballs. It does not reuse normal CI
 artifacts for publishing.
 
-Use npm's default public registry unless a release explicitly targets another
-registry. The workflow supports npm trusted publishing through GitHub OIDC; if
-trusted publishing is not configured, provide an `NPM_TOKEN` repository or
-environment secret.
+Publish to the public npm registry through GitHub OIDC, no npm token is used.
+Configure every published package to trust `release.yml` and the `npm-publish`
+environment with `npm publish` permission. Provenance is disabled because the
+publishing repository is internal.
 
 Manual local publish fallback:
 

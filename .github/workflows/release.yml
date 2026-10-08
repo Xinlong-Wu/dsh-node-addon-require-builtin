@@ -290,7 +290,26 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 24
-          registry-url: https://registry.npmjs.org
+
+      # Do not create setup-node's token-based .npmrc. The publish command uses
+      # the explicit npm registry and authenticates only through GitHub OIDC.
+      - name: Check OIDC publishing prerequisites
+        shell: bash
+        run: |
+          node --version
+          npm_version="$(npm --version)"
+          echo "npm $npm_version"
+          node - "$npm_version" <<'NODE'
+          const version = process.argv[2];
+          const [major, minor, patch] = version.split('.').map(Number);
+          if (!/^\d+\.\d+\.\d+$/.test(version) || major < 11 ||
+              (major === 11 && (minor < 5 || (minor === 5 && patch < 1)))) {
+            throw new Error(`npm >=11.5.1 is required for trusted publishing; got ${version}`);
+          }
+          for (const name of ['ACTIONS_ID_TOKEN_REQUEST_URL', 'ACTIONS_ID_TOKEN_REQUEST_TOKEN']) {
+            if (!process.env[name]) throw new Error(`Missing GitHub OIDC variable: ${name}`);
+          }
+          NODE
 
       - name: Download npm tarballs
         uses: actions/download-artifact@v4
@@ -301,7 +320,9 @@ jobs:
       - name: Publish tarballs
         run: |
           while IFS= read -r tarball; do
-            npm publish "dist/npm/${tarball}" --access public
+            npm publish "dist/npm/${tarball}" --access public --registry=https://registry.npmjs.org
           done < dist/npm/publish-order.txt
         env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+          # The publishing repository is internal; npm provenance requires a
+          # public source repository. OIDC authentication is independent of it.
+          NPM_CONFIG_PROVENANCE: "false"
