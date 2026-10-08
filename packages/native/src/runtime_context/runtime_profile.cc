@@ -17,11 +17,13 @@ struct ElectronProfileSpec {
   const char* diagnostic_name;
 };
 
-constexpr std::array<ElectronProfileSpec, 3> kElectronProfiles = {{
+constexpr std::array<ElectronProfileSpec, 4> kElectronProfiles = {{
     {"43.0.0", 24, 17, 0, "15.0.245.13-electron.0",
      "electron-43 tagged default=0"},
     {"44.0.0", 24, 18, 1, "15.2.124.13-electron.0",
      "electron-44 tagged default=0"},
+    {"44.7.0", 24, 21, 0, "15.2.124.28-electron.0",
+     "electron-44.7 tagged default=0"},
     {"45.0.0-alpha.6", 24, 21, 0, "15.4.80-electron.0",
      "electron-45-alpha tagged default=0"},
 }};

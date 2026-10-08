@@ -60,6 +60,14 @@ export const electronReleaseCatalog = new ElectronReleaseCatalog([
     'win32-arm64-msvc',
     'win32-x64-msvc',
   ]),
+  new ElectronRelease('44.7.0', 'electron-44-7', [
+    'darwin-arm64',
+    'darwin-x64',
+    'linux-arm64-gnu',
+    'linux-x64-gnu',
+    'win32-arm64-msvc',
+    'win32-x64-msvc',
+  ]),
   new ElectronRelease('45.0.0-alpha.6', 'electron-45', [
     'darwin-arm64',
     'darwin-x64',

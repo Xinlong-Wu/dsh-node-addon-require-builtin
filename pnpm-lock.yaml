@@ -17,6 +17,9 @@ importers:
       electron-44:
         specifier: npm:electron@44.0.0
         version: electron@44.0.0
+      electron-44-7:
+        specifier: npm:electron@44.7.0
+        version: electron@44.7.0
       electron-45:
         specifier: npm:electron@45.0.0-alpha.6
         version: electron@45.0.0-alpha.6
@@ -411,6 +414,11 @@ packages:
     engines: {node: '>= 22.12.0'}
     hasBin: true
 
+  electron@44.7.0:
+    resolution: {integrity: sha512-aUq9/zLAAFYc+a9gy6cd0C3Y/N/RmovLCD8TV8LhIzNhuND6HEgsu96jJz9cbAxvckSPv+Trf2PKEjktoZgFkw==}
+    engines: {node: '>= 22.12.0'}
+    hasBin: true
+
   electron@45.0.0-alpha.6:
     resolution: {integrity: sha512-rDOk8joEeuxrzM7Thonva+JS8UfZMQt3yCa9DdcEDwgtKIiaAvxN5KlQcG/INVVZchHCczSGPHzFJs9X+3J8tg==}
     engines: {node: '>= 22.12.0'}
@@ -657,6 +665,14 @@ snapshots:
       - supports-color
 
   electron@44.0.0:
+    dependencies:
+      '@electron-internal/extract-zip': 1.0.5
+      '@electron/get': 5.1.0
+      '@types/node': 24.13.2
+    transitivePeerDependencies:
+      - supports-color
+
+  electron@44.7.0:
     dependencies:
       '@electron-internal/extract-zip': 1.0.5
       '@electron/get': 5.1.0

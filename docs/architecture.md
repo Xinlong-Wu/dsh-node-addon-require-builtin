@@ -121,7 +121,7 @@ profile from two values compiled into the loaded runtime: the Node version from
 |---|---|---:|
 | Node 20/22/24 | untagged overload | n/a |
 | Node 26+ | tagged overload | `kPerContextData=2` |
-| Electron 43.0.0, 44.0.0, 45.0.0-alpha.6 | tagged overload | default `0` |
+| Electron 43.0.0, 44.0.0, 44.7.0, 45.0.0-alpha.6 | tagged overload | default `0` |
 
 Electron is identified by V8's compiled `-electron.` embedder suffix and then
 matched against the exact Node/V8 pair for each supported release. These values
