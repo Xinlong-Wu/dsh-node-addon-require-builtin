@@ -368,8 +368,39 @@ jobs:
           NARB_EXPECTED_BACKEND: napi
           NARB_DISABLE_LOCAL_BUILD: 1
 
-      # Reuse Node 26 for nodeabi. Windows x86 remains on Node 22 because
-      # later releases do not publish x86 binaries.
+      - name: Set up Node 27 nightly
+        if: matrix.platform != 'win32-ia32-msvc'
+        uses: actions/setup-node@v4
+        with:
+          node-version: 27-nightly
+          architecture: ${{ matrix.nodearch }}
+          check-latest: true
+
+      - name: Test N-API prebuild on Node 27 nightly
+        if: matrix.platform != 'win32-ia32-msvc'
+        shell: bash
+        run: |
+          node -p 'JSON.stringify({ node: process.version, v8: process.versions.v8, arch: process.arch })'
+          for family in $FAMILIES; do
+            echo "::group::$family"
+            NARB_PRODUCT="$family" node ./test/backend.test.js
+            NARB_PRODUCT="$family" node --expose-internals ./test/require-parity.test.js
+            echo "::endgroup::"
+          done
+        env:
+          NARB_BACKEND: napi
+          NARB_EXPECTED_BACKEND: napi
+          NARB_DISABLE_LOCAL_BUILD: 1
+
+      # Keep nodeabi source-build validation on the stable runtime. Windows x86
+      # remains on Node 22 because later releases publish no x86 binaries.
+      - name: Restore Node 26 for nodeabi source build
+        if: matrix.platform != 'win32-ia32-msvc'
+        uses: actions/setup-node@v4
+        with:
+          node-version: 26
+          architecture: ${{ matrix.nodearch }}
+
       - name: Prepare Node.js public headers
         run: pnpm -s headers -- --github-env
 

@@ -15,6 +15,13 @@ The implemented target families are:
 
 The N-API backend targets `napi-v9` across these majors.
 
+CI also exercises Node 27 nightly with both products on macOS, Linux glibc,
+and Windows arm64/x64, reusing the same N-API prebuilds. It selects the latest
+available nightly per platform and records its Node/V8 versions; those builds
+can differ across platforms. This is forward-compatibility coverage, not an
+extension of the stable support or published package matrix. Node 27 musl and
+nodeabi source builds are not covered.
+
 The internal module allowlist is documented separately in
 [internal-modules.md](internal-modules.md), including the supported semver
 ranges for each Node major.
