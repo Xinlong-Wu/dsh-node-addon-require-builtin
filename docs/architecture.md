@@ -132,6 +132,17 @@ initialization still writes Realm slot 38 with tag 0. An unknown Electron
 fingerprint fails before private context access; a V8 version without the
 Electron suffix follows the pre-Electron Node-major selection.
 
+`NapiEmbedderDataReader` resolves the entry point separately from the profile.
+For tagged profiles it prefers the exported
+`Context::GetAlignedPointerFromEmbedderData(int, uint16_t)` and otherwise uses
+the older `SlowGetAlignedPointerFromEmbedderData(int, uint16_t)`. V8 15.5 moved
+the former out of line and changed the slow helper to take `CppHeapPointerTag`;
+that overload is not interchangeable with the embedder-data tag and is never
+called. The public getter performs V8's tag conversion and unwraps the stored
+pointer. Symbol-based selection covers both old and new Node 27 nightlies
+without a Node-major cutoff. Missing compatible symbols still fail closed, and
+a null result does not trigger another getter call.
+
 The profile chooses the calling convention only. Realm field offsets remain
 runtime facts decoded from `PrincipalRealm::builtin_module_require()` machine
 code: Electron 43 currently yields `0x1b8`, while 44/45 yield `0x1c0` on the
