@@ -68,7 +68,7 @@ struct WindowsSymbolAlias {
 // `PEAX`/`PEAV`. A binary is built for exactly one architecture, so the correct
 // alias column is selected at compile time.
 #if defined(_M_IX86)
-constexpr std::array<WindowsSymbolAlias, 6> kWindowsSymbolAliases = {{
+constexpr std::array<WindowsSymbolAlias, 7> kWindowsSymbolAliases = {{
     {"_ZN2v82V810GetVersionEv", "?GetVersion@V8@v8@@SAPBDXZ"},
     {"_ZN2v87Isolate10GetCurrentEv",
      "?GetCurrent@Isolate@v8@@SAPAV12@XZ"},
@@ -80,9 +80,11 @@ constexpr std::array<WindowsSymbolAlias, 6> kWindowsSymbolAliases = {{
      "?SlowGetAlignedPointerFromEmbedderData@Context@v8@@AAEPAXH@Z"},
     {"_ZN2v87Context37SlowGetAlignedPointerFromEmbedderDataEit",
      "?SlowGetAlignedPointerFromEmbedderData@Context@v8@@AAEPAXHG@Z"},
+    {"_ZN2v87Context33GetAlignedPointerFromEmbedderDataEit",
+     "?GetAlignedPointerFromEmbedderData@Context@v8@@QAEPAXHG@Z"},
 }};
 #else
-constexpr std::array<WindowsSymbolAlias, 6> kWindowsSymbolAliases = {{
+constexpr std::array<WindowsSymbolAlias, 7> kWindowsSymbolAliases = {{
     {"_ZN2v82V810GetVersionEv", "?GetVersion@V8@v8@@SAPEBDXZ"},
     {"_ZN2v87Isolate10GetCurrentEv",
      "?GetCurrent@Isolate@v8@@SAPEAV12@XZ"},
@@ -94,6 +96,8 @@ constexpr std::array<WindowsSymbolAlias, 6> kWindowsSymbolAliases = {{
      "?SlowGetAlignedPointerFromEmbedderData@Context@v8@@AEAAPEAXH@Z"},
     {"_ZN2v87Context37SlowGetAlignedPointerFromEmbedderDataEit",
      "?SlowGetAlignedPointerFromEmbedderData@Context@v8@@AEAAPEAXHG@Z"},
+    {"_ZN2v87Context33GetAlignedPointerFromEmbedderDataEit",
+     "?GetAlignedPointerFromEmbedderData@Context@v8@@QEAAPEAXHG@Z"},
 }};
 #endif
 

@@ -96,6 +96,7 @@
           },
           {
             "sources": [
+              "src/runtime_context/embedder_data.cc",
               "src/runtime_context/runtime_profile.cc",
               "src/runtime_context/runtime_profile_napi.cc",
               "src/runtime_compat_napi.cc"

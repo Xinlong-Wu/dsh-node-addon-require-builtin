@@ -1,6 +1,7 @@
 #include "runtime_compat.h"
 
 #include "backend_config.h"
+#include "runtime_context/embedder_data.h"
 #include "runtime_context/helper.h"
 #include "runtime_context/runtime_profile.h"
 #include "runtime_probe/helper.h"
@@ -24,57 +25,8 @@ constexpr std::string_view kSymIsolateGetCurrentContext =
     "_ZN2v87Isolate17GetCurrentContextEv";
 constexpr std::string_view kSymContextGetNumberOfEmbedderDataFields =
     "_ZN2v87Context29GetNumberOfEmbedderDataFieldsEv";
-constexpr std::string_view kSymContextSlowGetAlignedPointerUntagged =
-    "_ZN2v87Context37SlowGetAlignedPointerFromEmbedderDataEi";
-constexpr std::string_view kSymContextSlowGetAlignedPointerTagged =
-    "_ZN2v87Context37SlowGetAlignedPointerFromEmbedderDataEit";
 
 using GetCurrentIsolateFn = void* (*)();
-using SlowGetAlignedPointerUntaggedFn =
-    void* (NARB_MEMBER_ABI*)(void*, int);
-using SlowGetAlignedPointerTaggedFn =
-    void* (NARB_MEMBER_ABI*)(void*, int, uint16_t);
-
-struct EmbedderDataRead {
-  void* realm_ptr = nullptr;
-  const char* family = nullptr;
-};
-
-Result<EmbedderDataRead> ReadRealmFromEmbedderData(
-    const NapiRuntimeProfile& profile,
-    void* context) {
-  if (profile.embedder_data_abi() == EmbedderDataAbi::kTagged) {
-    auto get_aligned_tagged =
-        LookupProcessFunction<SlowGetAlignedPointerTaggedFn>(
-            kSymContextSlowGetAlignedPointerTagged);
-    if (get_aligned_tagged == nullptr) {
-      return Result<EmbedderDataRead>::Failure(Status::Failure(
-          ProbeStatus::kUnsupportedNoRealm,
-          "tagged GetAlignedPointerFromEmbedderData symbol not found"));
-    }
-    DebugTrace("calling SlowGetAlignedPointerFromEmbedderData(tagged)");
-    return Result<EmbedderDataRead>::Ok({
-        get_aligned_tagged(
-            context, kRealmSlot, profile.embedder_data_tag()),
-        profile.diagnostic_name(),
-    });
-  }
-
-  auto get_aligned_untagged =
-      LookupProcessFunction<SlowGetAlignedPointerUntaggedFn>(
-          kSymContextSlowGetAlignedPointerUntagged);
-  if (get_aligned_untagged != nullptr) {
-    DebugTrace("calling SlowGetAlignedPointerFromEmbedderData(untagged)");
-    return Result<EmbedderDataRead>::Ok({
-        get_aligned_untagged(context, kRealmSlot),
-        profile.diagnostic_name(),
-    });
-  }
-
-  return Result<EmbedderDataRead>::Failure(Status::Failure(
-      ProbeStatus::kUnsupportedNoRealm,
-      "no compatible GetAlignedPointerFromEmbedderData symbol found"));
-}
 
 Result<RuntimeContext> ReadCurrentContext(napi_env env) {
   // Public Node-API does not expose v8::Context. This crosses the API boundary
@@ -135,13 +87,13 @@ Result<RuntimeContext> ReadCurrentContext(napi_env env) {
   auto profile = NapiRuntimeProfile::Detect(env);
   if (!profile.ok()) return Result<RuntimeContext>::Failure(profile.status());
 
-  auto embedder_data =
-      ReadRealmFromEmbedderData(profile.value(), context.context_ptr);
+  const NapiEmbedderDataReader reader(profile.value());
+  auto embedder_data = reader.ReadRealm(context.context_ptr);
   if (!embedder_data.ok()) {
     return Result<RuntimeContext>::Failure(embedder_data.status());
   }
-  context.embedder_data = embedder_data.value().family;
-  context.realm_ptr = embedder_data.value().realm_ptr;
+  context.embedder_data = profile.value().diagnostic_name();
+  context.realm_ptr = embedder_data.value();
 
   context.realm = reinterpret_cast<uintptr_t>(context.realm_ptr);
   DebugTrace("realm=%s", Hex(context.realm).c_str());

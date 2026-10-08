@@ -26,6 +26,8 @@ const args = [
   '-DNAPI_VERSION=9',
   '-DNARB_BACKEND=1',
   '-DNARB_PRODUCT=2',
+  path.join(packageRoot, 'src', 'debug_trace.cc'),
+  path.join(packageRoot, 'src', 'runtime_context', 'embedder_data.cc'),
   path.join(packageRoot, 'src', 'runtime_context', 'runtime_profile.cc'),
   path.join(root, 'test', 'runtime_profile_selftest.cc'),
   '-o',
