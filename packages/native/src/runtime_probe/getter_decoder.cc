@@ -769,4 +769,260 @@ Result<GetterPattern> MatchArm64Win64FieldGetter(void* getter,
   return Failure("win32-arm64 getter did not terminate with ret");
 }
 
+// --- RISC-V (RV64) ---------------------------------------------------------
+//
+// We do not need a general disassembler, only enough to walk the tiny getter
+// body one instruction at a time and recognize the forms a field accessor can
+// take. Any instruction outside that set makes the whole match fail closed.
+
+// rv64 Linux toolchains target rv64gc, so getter bodies mix 32-bit instructions
+// with RVC compressed 16-bit ones: the same field accessor can be
+// `ld a0,imm(a0); ret` (8 bytes), `c.ld a0,imm(a0); c.ret` (4 bytes), or the
+// compressed frame record of a hardened build. The window is therefore copied
+// as 16-bit halfwords and each step reads the low two bits to pick the
+// quadrant; quadrant 3 promotes the step to a 32-bit instruction. RISC-V Linux
+// is little-endian only, so the halfword reads decode the same bytes on every
+// build host the way the AArch64 word reads do.
+constexpr size_t kRiscv64HalfWindow = kGetterCodeWindowBytes / sizeof(uint16_t);
+constexpr size_t kHardenedRiscv64HalfWindow =
+    kHardenedGetterCodeWindowBytes / sizeof(uint16_t);
+
+// Operand-free termination, matched exactly: `jalr zero, 0(ra)`.
+constexpr uint32_t kRiscv64Ret = 0x00008067u;
+// Compressed termination: `c.ret` is the `c.jr ra` alias.
+constexpr uint16_t kRiscv64CRet = 0x8082u;
+// Compressed frame-pointer setup `mv s0, sp`, both CR-format registers pinned.
+constexpr uint16_t kRiscv64CMvS0Sp = 0x940au;
+
+// Sign-extends a raw 12-bit immediate without implementation-defined shifts.
+int64_t SignExtendRiscv64Imm12(uint32_t raw) {
+  return static_cast<int64_t>((raw ^ 0x800u) - 0x800u);
+}
+
+// `lpad` (Zicfilp): auipc with the destination register pinned to zero. The
+// 20-bit landing-pad label is free because it cannot affect which field the
+// getter reads.
+bool IsRiscv64Lpad(uint32_t insn) {
+  constexpr uint32_t kMask = 0x00000fffu;  // opcode + rd(zero)
+  constexpr uint32_t kPattern = 0x00000017u;
+  return (insn & kMask) == kPattern;
+}
+
+// Matches `ld a0, imm(a0)` (LOAD, funct3=3, both register fields pinned to A0)
+// and returns the byte offset it loads. The immediate is a plain signed byte
+// offset — unlike AArch64's ldr, RISC-V does not scale it by the access size.
+bool DecodeRiscv64LdA0FromA0(uint32_t insn, size_t* offset) {
+  constexpr uint32_t kMask = 0x000fffffu;  // opcode + funct3 + rs1(a0) + rd(a0)
+  constexpr uint32_t kPattern = 0x00053503u;
+  if ((insn & kMask) != kPattern) return false;
+  const int64_t imm = SignExtendRiscv64Imm12((insn >> 20) & 0xfffu);
+  if (imm < 0) return false;
+  *offset = static_cast<size_t>(imm);
+  return true;
+}
+
+// The frame record a hardened prologue sets up and tears down. The register
+// operands are pinned (the record saves RA and S0 against SP, and the frame
+// pointer is S0 <- SP) and only the frame offsets are left free — the frame
+// size does not have to be predicted, mirroring IsArm64FrameRecordInsn. It
+// cannot affect the result either way: the parsed offset comes solely from the
+// `ld` immediate.
+bool IsRiscv64FrameRecordInsn(uint32_t insn) {
+  // `addi sp, sp, imm` (prologue reserve and epilogue release) and
+  // `addi s0, sp, imm` (frame-pointer setup): OP-IMM funct3=0, rd+rs1 pinned.
+  constexpr uint32_t kAddiMask = 0x000fffffu;
+  constexpr uint32_t kAddiSpSp = 0x00010113u;
+  constexpr uint32_t kAddiS0Sp = 0x00010413u;
+  // `sd ra, imm(sp)` / `sd s0, imm(sp)`: STORE funct3=3, rs1 pinned to sp,
+  // rs2 pinned to ra/s0; the split S-type immediate is free.
+  constexpr uint32_t kStoreMask = 0x01fff07fu;
+  constexpr uint32_t kStoreRaSp = 0x00113023u;
+  constexpr uint32_t kStoreS0Sp = 0x00813023u;
+  // `ld ra, imm(sp)` / `ld s0, imm(sp)`: LOAD funct3=3, rs1 pinned to sp,
+  // rd pinned to ra/s0. Only restores of saved registers are accepted —
+  // `ld a0, imm(sp)` would be a spill reload, not a field read, and fails
+  // closed.
+  constexpr uint32_t kLoadMask = 0x000fffffu;
+  constexpr uint32_t kLoadRaSp = 0x00013083u;
+  constexpr uint32_t kLoadS0Sp = 0x00013403u;
+
+  const uint32_t addi = insn & kAddiMask;
+  if (addi == kAddiSpSp || addi == kAddiS0Sp) return true;
+  const uint32_t store = insn & kStoreMask;
+  if (store == kStoreRaSp || store == kStoreS0Sp) return true;
+  const uint32_t load = insn & kLoadMask;
+  return load == kLoadRaSp || load == kLoadS0Sp;
+}
+
+bool IsRiscv64BenignInsn(uint32_t insn) {
+  return IsRiscv64Lpad(insn) || IsRiscv64FrameRecordInsn(insn);
+}
+
+// Matches `c.ld a0, uimm(a0)` (RVC CL format, funct3=011, both 3-bit register
+// fields pinned to A0's compressed number) and returns the byte offset it
+// loads. The RVC immediate is scrambled across bits 12:10 and 6:5 and scaled
+// by the access size, so the decode reassembles the byte offset directly.
+bool DecodeRiscv64CLdA0FromA0(uint16_t insn, size_t* offset) {
+  constexpr uint16_t kMask = 0xe39fu;  // funct3 + rs1'(a0) + rd'(a0) + quadrant
+  constexpr uint16_t kPattern = 0x6108u;
+  if ((insn & kMask) != kPattern) return false;
+  *offset = (((insn >> 10) & 0x7u) << 3) | (((insn >> 5) & 0x3u) << 6);
+  return true;
+}
+
+// The compressed half of the frame record. Which compressed form a toolchain
+// picks for the sp adjustment is toolchain-specific — GCC emits plain
+// `c.addi sp, imm` and compresses the frame-pointer setup to
+// `c.addi4spn s0, sp, nzuimm`, while `c.addi16sp sp, imm` is the form the
+// ISA reserves for larger adjustments — so all three are accepted, each by a
+// pinned-register decode that leaves the scrambled RVC immediates free.
+bool IsRiscv64CFrameRecordInsn(uint16_t insn) {
+  // Quadrant 1/2 CI formats: funct3 + rd + quadrant pinned, imm free.
+  // c.addi16sp and c.ldsp share funct3=011 and are told apart by rd (sp vs a
+  // pinned saved register); c.addi is funct3=000 with rd=sp.
+  constexpr uint16_t kCiMask = 0xef83u;  // funct3 + rd + quadrant, imm free
+  constexpr uint16_t kCAddi16Sp = 0x6101u;  // c.addi16sp sp, imm
+  constexpr uint16_t kCAddiSp = 0x0101u;    // c.addi sp, imm
+  constexpr uint16_t kCLdSpRa = 0x6082u;    // c.ldsp ra, imm(sp)
+  constexpr uint16_t kCLdSpS0 = 0x6402u;    // c.ldsp s0, imm(sp)
+  // CSS format: funct3 + rs2 + quadrant pinned, imm free.
+  constexpr uint16_t kCssMask = 0xe07fu;
+  constexpr uint16_t kCSdSpRa = 0xe006u;    // c.sdsp ra, imm(sp)
+  constexpr uint16_t kCSdSpS0 = 0xe022u;    // c.sdsp s0, imm(sp)
+  // CIW format: c.addi4spn rd', sp, nzuimm with rd' pinned to s0 (the frame
+  // pointer). Any other destination, in particular a0, would rebase `this`
+  // before the field load and must fail closed. The all-zero halfword is the
+  // defined illegal instruction, not a zero-offset frame setup.
+  constexpr uint16_t kCAddi4SpnS0Mask = 0xe01fu;  // funct3 + rd'(s0) + quadrant
+  constexpr uint16_t kCAddi4SpnS0 = 0x0000u;
+
+  const uint16_t ci = insn & kCiMask;
+  if (ci == kCAddi16Sp || ci == kCAddiSp || ci == kCLdSpRa ||
+      ci == kCLdSpS0) {
+    return true;
+  }
+  const uint16_t css = insn & kCssMask;
+  if (css == kCSdSpRa || css == kCSdSpS0) return true;
+  if (insn == kRiscv64CMvS0Sp) return true;  // c.add s0,sp (mv s0,sp)
+  return insn != 0 && (insn & kCAddi4SpnS0Mask) == kCAddi4SpnS0;
+}
+
+// Composes the GetterPattern once a terminating return is decoded: the same
+// plausibility and diagnostics contract as the AArch64 walker, with a shape
+// that records which parts were compressed.
+Result<GetterPattern> FinishRiscv64Getter(std::string_view platform_tag,
+                                          bool found_load,
+                                          size_t offset,
+                                          bool has_lpad,
+                                          bool has_frame,
+                                          bool compressed_load,
+                                          bool compressed_ret) {
+  if (!found_load) {
+    return Failure("riscv64 getter returned without loading a field");
+  }
+  if (!IsPlausibleOffset(offset)) {
+    return Failure("riscv64 parsed getter offset is implausible");
+  }
+  std::string shape;
+  if (has_lpad) shape += "lpad-";
+  if (has_frame) shape += "frame-";
+  shape += compressed_load ? "c.ld" : "ld";
+  shape += "-a0-[this-imm]-";
+  shape += compressed_ret ? "c.ret" : "ret";
+  GetterPattern pattern;
+  pattern.offset = offset;
+  std::string text(platform_tag);
+  text += ' ';
+  text += shape;
+  pattern.pattern = std::move(text);
+  return Result<GetterPattern>::Ok(pattern);
+}
+
+// The RISC-V counterpart to MatchArm64AapcsFieldGetter: the landing pad and
+// frame-record instructions hardened builds emit can sit on either side of the
+// field load, so the body is walked one instruction at a time rather than
+// matched at fixed positions. Only the exact encodings accepted by the decode
+// helpers above are skipped and exactly one field load is permitted, so a
+// function that is not a plain field accessor still fails closed instead of
+// yielding an offset.
+Result<GetterPattern> MatchRiscv64FieldGetter(void* getter,
+                                              std::string_view platform_tag,
+                                              size_t window_bytes) {
+  if (window_bytes > kHardenedGetterCodeWindowBytes) {
+    window_bytes = kHardenedGetterCodeWindowBytes;
+  }
+  const size_t halfwords = window_bytes / sizeof(uint16_t);
+  if (halfwords == 0) {
+    return Failure("riscv64 getter window is too small to decode");
+  }
+
+  std::array<uint16_t, kHardenedRiscv64HalfWindow> code{};
+  std::memcpy(code.data(), getter, halfwords * sizeof(code[0]));
+
+  bool found_load = false;
+  bool has_lpad = false;
+  bool has_frame = false;
+  bool compressed_load = false;
+  size_t offset = 0;
+
+  size_t index = 0;
+  while (index < halfwords) {
+    const uint16_t bits = code[index];
+
+    if ((bits & 0x3u) != 0x3u) {
+      // Compressed quadrant: 16-bit instruction.
+      if (bits == kRiscv64CRet) {
+        return FinishRiscv64Getter(platform_tag, found_load, offset, has_lpad,
+                                   has_frame, compressed_load, true);
+      }
+      size_t candidate = 0;
+      if (DecodeRiscv64CLdA0FromA0(bits, &candidate)) {
+        if (found_load) {
+          return Failure("riscv64 getter loads more than one field");
+        }
+        found_load = true;
+        compressed_load = true;
+        offset = candidate;
+      } else if (IsRiscv64CFrameRecordInsn(bits)) {
+        has_frame = true;
+      } else {
+        return Failure("riscv64 getter contains an unrecognized instruction");
+      }
+      index += 1;
+      continue;
+    }
+
+    // 32-bit quadrant: consume two halfwords.
+    if (halfwords - index < 2) {
+      return Failure("riscv64 getter ends inside an instruction");
+    }
+    uint32_t insn = 0;
+    std::memcpy(&insn, &code[index], sizeof(insn));
+
+    if (insn == kRiscv64Ret) {
+      return FinishRiscv64Getter(platform_tag, found_load, offset, has_lpad,
+                                 has_frame, compressed_load, false);
+    }
+    size_t candidate = 0;
+    if (DecodeRiscv64LdA0FromA0(insn, &candidate)) {
+      if (found_load) {
+        return Failure("riscv64 getter loads more than one field");
+      }
+      found_load = true;
+      offset = candidate;
+    } else if (IsRiscv64BenignInsn(insn)) {
+      if (IsRiscv64Lpad(insn)) {
+        has_lpad = true;
+      } else {
+        has_frame = true;
+      }
+    } else {
+      return Failure("riscv64 getter contains an unrecognized instruction");
+    }
+    index += 2;
+  }
+
+  return Failure("riscv64 getter did not terminate with ret");
+}
+
 }  // namespace esplus::node::require_builtin

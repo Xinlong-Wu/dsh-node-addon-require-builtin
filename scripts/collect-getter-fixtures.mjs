@@ -93,6 +93,34 @@ const X64_HARDENING = [
   ],
 ];
 
+// GCC maps -fcf-protection onto Zicfilp/Zicfiss on riscv64 (GCC 14+); the
+// march-less entries only compile on toolchains that auto-enable the
+// extensions, and anything the compiler rejects is skipped like every other
+// unsupported flag combination here.
+const RISCV64_HARDENING = [
+  [],
+  ['-fcf-protection=branch'],
+  ['-fcf-protection=full'],
+  ['-march=rv64gc_zicfilp', '-fcf-protection=full'],
+  ['-fno-omit-frame-pointer'],
+  // The flag that gives even a leaf function a frame record, mirroring the
+  // AArch64 and x86-64 matrices; whether the riscv64 backend accepts it is
+  // exactly what this fixture matrix is here to find out.
+  ['-mno-omit-leaf-frame-pointer'],
+  ['-fno-omit-frame-pointer', '-mno-omit-leaf-frame-pointer'],
+  ['-fstack-protector-strong'],
+  ['-fstack-clash-protection'],
+  // Approximates Fedora's package build flags on riscv64, minus the
+  // -mbranch-protection set that is AArch64-only.
+  [
+    '-fcf-protection=full',
+    '-fstack-protector-strong',
+    '-fstack-clash-protection',
+    '-fno-omit-frame-pointer',
+    '-mno-omit-leaf-frame-pointer',
+  ],
+];
+
 const ARM64_RET = 0xd65f03c0;
 // `retaa`/`retab` fuse the pointer-authentication check into the return, so a
 // getter built with `-mbranch-protection=pac-ret+leaf` terminates on one of
@@ -148,12 +176,112 @@ function trimX64(bytes) {
   return null;
 }
 
+// Minimal RISC-V (RV64) walker covering exactly the instruction forms the C++
+// decoder recognizes, in the same halfword-then-quadrant order. This is the
+// deliberate second implementation: { end, offset } where `end` is the byte
+// index past the terminating `ret`/`c.ret` and `offset` is the field offset the
+// body loads — null when the body is not a plain accessor (stack traffic) but
+// still ends at a recognizable terminator, so the shape is archived for the
+// self-test to assert the rejection on. Returns null when no terminator is
+// found in the captured window at all.
+function riscv64Walk(bytes) {
+  let i = 0;
+  let offset = null;
+  while (i + 2 <= bytes.length) {
+    const half = bytes[i] | (bytes[i + 1] << 8);
+    if ((half & 3) !== 3) {
+      // c.ret (c.jr ra).
+      if (half === 0x8082) return { end: i + 2, offset };
+      // c.ld a0, uimm(a0).
+      if ((half & 0xe39f) === 0x6108) {
+        if (offset !== null) return { end: i + 2, offset: null };
+        offset = (((half >>> 10) & 7) << 3) | (((half >>> 5) & 3) << 6);
+        i += 2;
+        continue;
+      }
+      const ci = half & 0xef83;
+      const css = half & 0xe07f;
+      // c.addi16sp / c.addi sp / c.ldsp ra,s0 / c.sdsp ra,s0 / c.add s0,sp /
+      // c.addi4spn s0 (the all-zero halfword is the illegal instruction, not a
+      // zero-offset frame setup).
+      if (
+        ci === 0x6101 ||
+        ci === 0x0101 ||
+        ci === 0x6082 ||
+        ci === 0x6402 ||
+        css === 0xe006 ||
+        css === 0xe022 ||
+        half === 0x940a ||
+        (half !== 0 && (half & 0xe01f) === 0)
+      ) {
+        i += 2;
+        continue;
+      }
+      return { end: i + 2, offset: null };
+    }
+    if (i + 4 > bytes.length) return null;
+    const word =
+      (bytes[i] |
+        (bytes[i + 1] << 8) |
+        (bytes[i + 2] << 16) |
+        (bytes[i + 3] << 24)) >>>
+      0;
+    // ret (jalr zero, 0(ra)).
+    if (word === 0x00008067) return { end: i + 4, offset };
+    // lpad (auipc zero): 20-bit landing-pad label is free.
+    if ((word & 0xfff) === 0x17) {
+      i += 4;
+      continue;
+    }
+    // ld a0, imm(a0): plain signed byte offset.
+    if ((word & 0xfffff) === 0x53503) {
+      if (offset !== null) return { end: i + 4, offset: null };
+      let imm = (word >>> 20) & 0xfff;
+      if (imm & 0x800) imm -= 0x1000;
+      offset = imm < 0 ? null : imm;
+      i += 4;
+      continue;
+    }
+    const masked = word & 0xfffff;
+    const store = word & 0x01fff07f;
+    // addi sp,s0(sp) frame adjusts / sd,ld ra,s0(sp) frame record.
+    if (
+      masked === 0x10113 ||
+      masked === 0x10413 ||
+      store === 0x113023 ||
+      store === 0x813023 ||
+      masked === 0x13083 ||
+      masked === 0x13403
+    ) {
+      i += 4;
+      continue;
+    }
+    return { end: i + 4, offset: null };
+  }
+  return null;
+}
+
 function detectArch() {
+  // NARB_FIXTURE_ARCH collects fixtures for a non-host architecture through a
+  // cross toolchain (CXX=riscv64-linux-gnu-g++); the probe binary runs under
+  // the matching qemu-user emulator instead of natively.
+  const override = process.env.NARB_FIXTURE_ARCH;
+  if (override) {
+    if (override !== 'arm64' && override !== 'x64' && override !== 'riscv64') {
+      throw new Error(`unsupported NARB_FIXTURE_ARCH: ${override}`);
+    }
+    return override;
+  }
   const machine = os.arch();
   if (machine === 'arm64') return 'arm64';
   if (machine === 'x64') return 'x64';
   throw new Error(`unsupported host architecture: ${machine}`);
 }
+
+// Per-target qemu-user emulator used when the fixture architecture is not the
+// host architecture. NARB_FIXTURE_EMULATOR overrides the full command (e.g.
+// "qemu-riscv64 -L /path/to/sysroot" for a cross sysroot).
+const RISCV64_EMULATOR = process.env.NARB_FIXTURE_EMULATOR || 'qemu-riscv64';
 
 function toolchainId(compiler) {
   const probe = spawnSync(compiler, ['--version'], { encoding: 'utf8' });
@@ -172,7 +300,16 @@ function collect() {
   const arch = detectArch();
   const compiler = process.env.CXX || 'c++';
   const toolchain = toolchainId(compiler);
-  const hardening = arch === 'arm64' ? ARM64_HARDENING : X64_HARDENING;
+  const hardening =
+    arch === 'arm64'
+      ? ARM64_HARDENING
+      : arch === 'riscv64'
+        ? RISCV64_HARDENING
+        : X64_HARDENING;
+  const cross = arch !== os.arch();
+  const emulatorArgv = cross && arch === 'riscv64'
+    ? RISCV64_EMULATOR.trim().split(/\s+/)
+    : null;
 
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'narb-fixtures-'));
   const src = path.join(dir, 'probe.cc');
@@ -193,13 +330,29 @@ function collect() {
       }
       let hex;
       try {
-        hex = execFileSync(bin, { encoding: 'utf8' }).trim();
+        hex = (
+          emulatorArgv
+            ? execFileSync(emulatorArgv[0], [...emulatorArgv.slice(1), bin])
+            : execFileSync(bin, [])
+        )
+          .toString()
+          .trim();
       } catch {
-        skipped.push({ flags: argv.join(' '), reason: 'probe run failed' });
+        skipped.push({
+          flags: argv.join(' '),
+          reason: emulatorArgv
+            ? `probe run failed under ${emulatorArgv.join(' ')}`
+            : 'probe run failed',
+        });
         continue;
       }
       const raw = Buffer.from(hex, 'hex');
-      const trimmed = arch === 'arm64' ? trimArm64(raw) : trimX64(raw);
+      let trimmed;
+      if (arch === 'arm64') trimmed = trimArm64(raw);
+      else if (arch === 'riscv64') {
+        const walk = riscv64Walk(raw);
+        trimmed = walk ? raw.subarray(0, walk.end) : null;
+      } else trimmed = trimX64(raw);
       if (!trimmed) {
         skipped.push({
           flags: argv.join(' '),
@@ -255,6 +408,9 @@ function offsetFromBytes(bytes, arch) {
       }
     }
     return null;
+  }
+  if (arch === 'riscv64') {
+    return riscv64Walk(bytes)?.offset ?? null;
   }
   for (let i = 0; i < bytes.length; i++) {
     // REX.W mov rax, [rdi + disp]
@@ -319,12 +475,18 @@ function fromElf(soPath, symbol, label) {
   fs.readSync(fd, raw, 0, CAPTURE_BYTES, Number(fileOffset));
   fs.closeSync(fd);
 
-  const elfArch = /aarch64|ARM64/i.test(
-    execFileSync('readelf', ['-h', soPath], { encoding: 'utf8' }),
-  )
+  const header = execFileSync('readelf', ['-h', soPath], { encoding: 'utf8' });
+  const elfArch = /aarch64|ARM64/i.test(header)
     ? 'arm64'
-    : 'x64';
-  const trimmed = elfArch === 'arm64' ? trimArm64(raw) : trimX64(raw);
+    : /RISC-V/i.test(header)
+      ? 'riscv64'
+      : 'x64';
+  let trimmed;
+  if (elfArch === 'arm64') trimmed = trimArm64(raw);
+  else if (elfArch === 'riscv64') {
+    const walk = riscv64Walk(raw);
+    trimmed = walk ? raw.subarray(0, walk.end) : null;
+  } else trimmed = trimX64(raw);
   if (!trimmed) {
     return {
       arch: elfArch,

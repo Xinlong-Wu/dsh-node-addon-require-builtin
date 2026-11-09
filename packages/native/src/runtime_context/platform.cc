@@ -30,6 +30,8 @@ Result<CurrentContextRead> ReadCurrentV8Context(
   return ReadDarwinX64CurrentV8Context(isolate, symbols);
 #elif defined(__linux__) && defined(__aarch64__)
   return ReadLinuxArm64CurrentV8Context(isolate, symbols);
+#elif defined(__linux__) && defined(__riscv) && (__riscv_xlen == 64)
+  return ReadLinuxRiscv64CurrentV8Context(isolate, symbols);
 #elif defined(__linux__) && defined(__x86_64__)
   return ReadLinuxX64CurrentV8Context(isolate, symbols);
 #elif defined(__linux__)

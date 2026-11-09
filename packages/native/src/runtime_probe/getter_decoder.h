@@ -20,7 +20,10 @@ namespace esplus::node::require_builtin {
 // functions with no BTI pad and no stack frame. Windows x86 has a separate
 // window below. If a future toolchain emits longer bodies, the relevant
 // platform contract and readable-range guarantee must grow together, and the
-// decoder must still terminate on `ret` within that window.
+// decoder must still terminate on `ret` within that window. RV64 getters fit
+// with room to spare: the uncompressed shape is `lpad?; ld a0,imm(a0); ret`
+// (8–12 bytes) and the compressed shape is half that, because RVC halves both
+// instructions.
 constexpr size_t kGetterCodeWindowBytes = 16;
 
 // Electron 43 win32-ia32 emits an 18-byte framed __thiscall sret getter. Keep
@@ -42,7 +45,22 @@ constexpr size_t kX86GetterCodeWindowBytes = 24;
 //     endbr64; push rbp; mov rbp,rsp;
 //     mov rax,[rdi+disp32]; pop rbp; ret
 //
-// Both architectures therefore get the same retry-in-a-wider-window treatment
+//   riscv64, a frame record in compressed instructions — 20–22 bytes (every
+//   Linux riscv64 toolchain targets rv64gc, so the frame record compresses the
+//   way x86-64's and AArch64's cannot). Verified against gcc-14's actual
+//   riscv64 output:
+//     c.addi sp,-16; c.sdsp ra,8(sp); c.sdsp s0,0(sp); c.addi4spn s0,16;
+//     [lpad;] ld a0,imm(a0); c.ldsp ra,8(sp); c.ldsp s0,0(sp);
+//     c.addi sp,16; c.ret
+//   with c.addi16sp sp,±N the form the ISA reserves for larger sp adjustments.
+//
+//   A frame record emitted entirely in uncompressed instructions — only
+//   reachable with a toolchain that does not target RVC, which no Linux
+//   distribution does because the psABI mandates the C extension — would be
+//   ~36–44 bytes and fall outside even this window; it fails closed rather
+//   than growing the shared contract for a shape no current build produces.
+//
+// All of these therefore get the same retry-in-a-wider-window treatment
 // (see the Linux parsers). Growing kGetterCodeWindowBytes itself would
 // lengthen the memcpy every matcher performs on every platform, including the
 // Windows vtable scanner that walks arbitrary code pointers, so the longer
@@ -128,6 +146,27 @@ Result<GetterPattern> MatchArm64AapcsFieldGetter(void* getter,
 // X0-return form, selecting the call mode accordingly.
 Result<GetterPattern> MatchArm64Win64FieldGetter(void* getter,
                                                  std::string_view platform_tag);
+
+// RISC-V RV64 (Linux): `this` in A0, result returned in A0. Like
+// MatchArm64AapcsFieldGetter, this is the walking matcher for a Linux target,
+// but it walks 16-bit halfwords rather than 32-bit words: rv64gc bodies mix
+// RVC compressed instructions (c.ld, c.ret, the frame record) with 32-bit
+// ones, and a fixed 4-byte stride cannot decode that.
+//
+// `window_bytes` is how many bytes the caller has confirmed are readable at
+// `getter`; it is clamped to kHardenedGetterCodeWindowBytes.
+//
+// The recognized set is the one-instruction field load `ld a0,imm(a0)` (or its
+// compressed `c.ld` form, destination pinned to A0 in both), termination by
+// `ret` or `c.ret`, the Zicfilp `lpad` landing pad, and the frame record
+// hardened builds wrap around all of it — each prologue/epilogue instruction
+// matched by a pinned-register decode that leaves only the frame offsets free,
+// mirroring IsArm64FrameRecordInsn. Anything else fails closed; in particular
+// a load into a scratch register followed by a register move is rejected, so
+// the parsed offset can only come from a direct read of `this`.
+Result<GetterPattern> MatchRiscv64FieldGetter(void* getter,
+                                              std::string_view platform_tag,
+                                              size_t window_bytes);
 
 // x86 (32-bit) Windows (MSVC __thiscall): `this` in ECX. A pointer/scalar
 // return comes back in EAX from a bare `ret`; a non-trivial return uses a hidden
