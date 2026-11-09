@@ -129,6 +129,8 @@ function ciPlatformMatrix() {
           // it encodes only platform and ABI.
           filename: entry.filename,
           families: FAMILIES.join(' '),
+          glibc_floor: entry.glibc_floor,
+          glibcxx_floor: entry.glibcxx_floor,
           // Artifact names must stay per family because downstream jobs (hmr,
           // distro-node) resolve them by name. upload-artifact takes one name per
           // step, so ci.yml has one upload step per entry here; adding a family

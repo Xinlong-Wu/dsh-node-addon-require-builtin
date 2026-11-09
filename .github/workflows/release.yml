@@ -136,7 +136,7 @@ jobs:
         run: |
           # Cross toolchain sysroot = Ubuntu 24.04 glibc 2.39, the baseline
           # manylinux_2_39 (riscv64) pins; floors asserted below.
-          NARB_PRODUCT="${{ matrix.family }}" \
+          NARB_PRODUCT="${{ matrix.family }}" NARB_TARGET_ARCH=riscv64 \
             CXX=riscv64-linux-gnu-g++-14 pnpm build:prebuild:napi
 
       - name: Test N-API prebuild under riscv64 emulation
@@ -154,6 +154,9 @@ jobs:
               export DEBIAN_FRONTEND=noninteractive
               apt-get update -qq
               apt-get install -y -qq --no-install-recommends nodejs >/dev/null
+              mkdir -p packages/${{ matrix.family }}/linux-riscv64-gnu/node_modules
+              ln -sfn ../../../loader \
+                packages/${{ matrix.family }}/linux-riscv64-gnu/node_modules/node-addon-native-custom-loader
               env -u LD_LIBRARY_PATH \
                 NARB_EXPECTED_BACKEND=napi NARB_DISABLE_LOCAL_BUILD=1 \
                 node ./test/backend.test.js

@@ -178,7 +178,8 @@ jobs:
           # floors this emits are asserted below.
           for family in $FAMILIES; do
             echo "::group::cross-compile $family"
-            NARB_PRODUCT="$family" CXX=riscv64-linux-gnu-g++-14 pnpm build:prebuild:napi
+            NARB_PRODUCT="$family" NARB_TARGET_ARCH=riscv64 \
+              CXX=riscv64-linux-gnu-g++-14 pnpm build:prebuild:napi
             echo "::endgroup::"
           done
 
@@ -202,6 +203,15 @@ jobs:
               export DEBIAN_FRONTEND=noninteractive
               apt-get update -qq
               apt-get install -y -qq --no-install-recommends nodejs >/dev/null
+              # The host pnpm install skips optional packages whose os/cpu does
+              # not match the x64 runner, so the riscv64 platform packages have
+              # no node_modules link to the shared loader; provide it the way a
+              # real npm install would resolve it.
+              for family in $FAMILIES; do
+                mkdir -p "packages/$family/linux-riscv64-gnu/node_modules"
+                ln -sfn ../../../loader \
+                  "packages/$family/linux-riscv64-gnu/node_modules/node-addon-native-custom-loader"
+              done
               for family in $FAMILIES; do
                 echo "::group::test $family under riscv64 emulation"
                 env -u LD_LIBRARY_PATH \
