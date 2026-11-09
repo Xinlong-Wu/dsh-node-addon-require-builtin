@@ -72,13 +72,13 @@ They share the process C++ runtime instead of embedding another `libstdc++` or
 and rejects artifacts requiring newer than `GLIBC_2.28` or `GLIBCXX_3.4.25`.
 
 `linux-riscv64-gnu` is cross-compiled on the hosted x64 runner: GitHub
-publishes no hosted riscv64 runner, and the riscv64 compilers of a native
-riscv64 image do not survive qemu-user emulation (qemu-user runs the test
-workload — Node — reliably but not the large host-pie compiler binaries), so
-emulation is reserved for testing. The cross toolchain's sysroot is Ubuntu
-24.04's glibc 2.39, the same baseline `manylinux_2_39` (riscv64, ALPHA) pins,
-whose compatibility range the produced artifact inherits: Ubuntu 24.04+,
-Debian 13+, Fedora 40+. CI asserts the floors the cross build actually emits —
+publishes no hosted riscv64 runner, and building inside an emulated riscv64
+container — which the Debian/Ubuntu riscv64 ports do for GCC and LLVM, via
+kernel binfmt registration — would be 10-20x slower under emulation and was
+not pre-verifiable before landing. Emulation is therefore reserved for
+testing. The cross toolchain's sysroot is Ubuntu 24.04's glibc 2.39, the same
+baseline `manylinux_2_39` (riscv64, ALPHA) pins, whose compatibility range
+the produced artifact inherits: Ubuntu 24.04+, Debian 13+, Fedora 40+. CI asserts the floors the cross build actually emits —
 `GLIBC_2.34` and `GLIBCXX_3.4.26`. Because glibc 2.34 folded libdl into libc,
 this platform's artifact records no `libdl.so.2` dependency. The behavioral
 tests run the cross-compiled prebuilds inside a riscv64 Debian trixie

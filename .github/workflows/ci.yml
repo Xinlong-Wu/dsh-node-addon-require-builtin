@@ -46,10 +46,13 @@ jobs:
       - uses: actions/checkout@v4
 
       # GitHub publishes no hosted riscv64 runner: the prebuild is
-      # cross-compiled natively on this runner (stable — qemu-user cannot run
-      # the large host-pie compilers of a riscv64 image reliably), and the
-      # behavioral tests run inside a riscv64 Debian container under QEMU
-      # user-mode emulation, which needs registering first.
+      # cross-compiled natively on this runner, and the behavioral tests run
+      # inside a riscv64 Debian container, which needs QEMU's user-mode
+      # emulation registered first. Building inside the emulated container
+      # instead would also work with binfmt registered (that is how the Debian
+      # and Ubuntu riscv64 ports build GCC/LLVM), but it is 10-20x slower and
+      # was not pre-verifiable here, so the native cross build is the chosen
+      # path; see docs/support-matrix.md.
       - name: Set up QEMU (riscv64 test container)
         if: matrix.platform == 'linux-riscv64-gnu'
         uses: docker/setup-qemu-action@v3
@@ -168,12 +171,10 @@ jobs:
         if: runner.os == 'Linux' && matrix.platform == 'linux-riscv64-gnu'
         shell: bash
         run: |
-          # manylinux publishes no riscv64 image we can build in (its riscv64
-          # compilers do not survive qemu-user), so the prebuild is
-          # cross-compiled with the runner's native gcc instead. The cross
-          # sysroot is Ubuntu 24.04's glibc 2.39 — the same baseline
-          # manylinux_2_39 (riscv64) pins and the compatibility range its
-          # README documents (Ubuntu 24.04+, Debian 13+, Fedora 40+); the
+          # The prebuild is cross-compiled with the runner's native gcc. The
+          # cross sysroot is Ubuntu 24.04's glibc 2.39 — the same baseline
+          # manylinux_2_39 (riscv64, ALPHA) pins and the compatibility range
+          # its README documents (Ubuntu 24.04+, Debian 13+, Fedora 40+); the
           # floors this emits are asserted below.
           for family in $FAMILIES; do
             echo "::group::cross-compile $family"
