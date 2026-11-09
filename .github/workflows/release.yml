@@ -149,7 +149,7 @@ jobs:
             bash -ceu '
               export DEBIAN_FRONTEND=noninteractive
               apt-get update -qq
-              apt-get install -y -qq --no-install-recommends g++ nodejs nodejs-dev >/dev/null
+              apt-get install -y -qq --no-install-recommends g++ nodejs libnode-dev >/dev/null
               export CXX=g++
               mkdir -p "packages/${{ matrix.family }}/linux-riscv64-gnu/node_modules"
               ln -sfn ../../../loader \

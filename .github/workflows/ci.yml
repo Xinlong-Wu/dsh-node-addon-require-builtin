@@ -189,7 +189,7 @@ jobs:
             bash -ceu '
               export DEBIAN_FRONTEND=noninteractive
               apt-get update -qq
-              apt-get install -y -qq --no-install-recommends g++ nodejs nodejs-dev >/dev/null
+              apt-get install -y -qq --no-install-recommends g++ nodejs libnode-dev >/dev/null
               export CXX=g++
               # The host pnpm install skips optional packages whose os/cpu does
               # not match the x64 runner, so the riscv64 platform packages have
