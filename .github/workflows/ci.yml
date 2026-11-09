@@ -45,10 +45,12 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      # GitHub publishes no hosted riscv64 runner: the riscv64 build and its
-      # behavioral tests run inside a riscv64 Debian container on this x64
-      # runner, which needs QEMU's user-mode emulation registered first.
-      - name: Set up QEMU (riscv64 emulation)
+      # GitHub publishes no hosted riscv64 runner: the prebuild is
+      # cross-compiled natively on this runner (stable — qemu-user cannot run
+      # the large host-pie compilers of a riscv64 image reliably), and the
+      # behavioral tests run inside a riscv64 Debian container under QEMU
+      # user-mode emulation, which needs registering first.
+      - name: Set up QEMU (riscv64 test container)
         if: matrix.platform == 'linux-riscv64-gnu'
         uses: docker/setup-qemu-action@v3
         with:
@@ -77,16 +79,6 @@ jobs:
 
       - name: Build TypeScript entrypoints
         run: pnpm build:ts
-
-      - name: Transpile the build script to plain JS for the riscv64 container
-        if: matrix.platform == 'linux-riscv64-gnu'
-        run: |
-          # The riscv64 container runs Debian's own Node, which cannot execute
-          # the host pnpm install's x64 tsx/esbuild binaries. Bundling
-          # scripts/build.ts to CJS on the host leaves the container needing
-          # only g++ and distro Node.
-          npx esbuild scripts/build.ts --bundle --platform=node --format=cjs \
-            --outfile=build/ts-cjs/build.js
 
       - name: Select VS2022-compatible ARM64 toolchain
         if: matrix.platform == 'win32-arm64-msvc'
@@ -165,25 +157,42 @@ jobs:
               done
             '
 
-      - name: Build and test N-API prebuild under riscv64 emulation
+      - name: Install riscv64 cross toolchain
+        if: runner.os == 'Linux' && matrix.platform == 'linux-riscv64-gnu'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            g++-14-riscv64-linux-gnu libc6-dev-riscv64-cross
+
+      - name: Cross-compile N-API prebuild
         if: runner.os == 'Linux' && matrix.platform == 'linux-riscv64-gnu'
         shell: bash
         run: |
-          # manylinux publishes no riscv64 image, so the glibc 2.28 baseline is
-          # unreachable on this architecture. The measured baseline is the
-          # riscv64 Debian trixie build container instead (floors asserted
-          # below; rationale in docs/support-matrix.md). The addon is compiled
-          # with the container's own gcc, and the behavioral tests run against
-          # Debian's packaged Node 20 — a hardened distro build whose libnode
-          # getter carries the compressed frame record the walking decoder
-          # exists for. The host pnpm install cannot be reused (its tsx/esbuild
-          # binaries are x64), so scripts/build.ts is transpiled to plain JS in
-          # the step before and run with the container's Node.
+          # manylinux publishes no riscv64 image we can build in (its riscv64
+          # compilers do not survive qemu-user), so the prebuild is
+          # cross-compiled with the runner's native gcc instead. The cross
+          # sysroot is Ubuntu 24.04's glibc 2.39 — the same baseline
+          # manylinux_2_39 (riscv64) pins and the compatibility range its
+          # README documents (Ubuntu 24.04+, Debian 13+, Fedora 40+); the
+          # floors this emits are asserted below.
+          for family in $FAMILIES; do
+            echo "::group::cross-compile $family"
+            NARB_PRODUCT="$family" CXX=riscv64-linux-gnu-g++-14 pnpm build:prebuild:napi
+            echo "::endgroup::"
+          done
+
+      - name: Test N-API prebuild under riscv64 emulation
+        if: runner.os == 'Linux' && matrix.platform == 'linux-riscv64-gnu'
+        shell: bash
+        run: |
+          # Behavioral coverage runs the cross-compiled prebuilds against
+          # Debian trixie's packaged Node 20 inside the riscv64 container — a
+          # hardened distro libnode build whose getter carries the compressed
+          # frame record the walking decoder exists for, and exactly the
+          # compatibility pairing the glibc 2.39 baseline promises.
           image=riscv64/debian:trixie
           docker pull --platform linux/riscv64 "$image"
           docker run --rm --platform linux/riscv64 \
-            --env NARB_BACKEND=napi \
-            --env NARB_BUILD_OUTPUT=prebuild \
             --env FAMILIES \
             --volume "$GITHUB_WORKSPACE:/workspace" \
             --workdir /workspace \
@@ -191,17 +200,14 @@ jobs:
             bash -ceu '
               export DEBIAN_FRONTEND=noninteractive
               apt-get update -qq
-              apt-get install -y -qq --no-install-recommends g++ nodejs nodejs-dev >/dev/null
-              export CXX=g++
-
+              apt-get install -y -qq --no-install-recommends nodejs >/dev/null
               for family in $FAMILIES; do
-                echo "::group::build and test $family under riscv64 emulation"
-                export NARB_PRODUCT="$family"
-                node build/ts-cjs/build.js
+                echo "::group::test $family under riscv64 emulation"
                 env -u LD_LIBRARY_PATH \
-                  NARB_EXPECTED_BACKEND=napi NARB_DISABLE_LOCAL_BUILD=1 \
-                  node ./test/backend.test.js
-                env -u LD_LIBRARY_PATH NARB_DISABLE_LOCAL_BUILD=1 \
+                  NARB_PRODUCT="$family" NARB_EXPECTED_BACKEND=napi \
+                  NARB_DISABLE_LOCAL_BUILD=1 node ./test/backend.test.js
+                env -u LD_LIBRARY_PATH NARB_PRODUCT="$family" \
+                  NARB_DISABLE_LOCAL_BUILD=1 \
                   node --expose-internals ./test/require-parity.test.js
                 echo "::endgroup::"
               done

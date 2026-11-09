@@ -71,19 +71,23 @@ They share the process C++ runtime instead of embedding another `libstdc++` or
 `libgcc`. CI builds and loads them against the manylinux 2.28 system libraries
 and rejects artifacts requiring newer than `GLIBC_2.28` or `GLIBCXX_3.4.25`.
 
-`linux-riscv64-gnu` is the one platform without a manylinux baseline: manylinux
-publishes no riscv64 image, so the prebuild is produced inside the riscv64
-Debian trixie container and CI asserts the floors that build actually emits —
+`linux-riscv64-gnu` is cross-compiled on the hosted x64 runner: GitHub
+publishes no hosted riscv64 runner, and the riscv64 compilers of a native
+riscv64 image do not survive qemu-user emulation (qemu-user runs the test
+workload — Node — reliably but not the large host-pie compiler binaries), so
+emulation is reserved for testing. The cross toolchain's sysroot is Ubuntu
+24.04's glibc 2.39, the same baseline `manylinux_2_39` (riscv64, ALPHA) pins,
+whose compatibility range the produced artifact inherits: Ubuntu 24.04+,
+Debian 13+, Fedora 40+. CI asserts the floors the cross build actually emits —
 `GLIBC_2.34` and `GLIBCXX_3.4.26`. Because glibc 2.34 folded libdl into libc,
-this platform's artifact records no `libdl.so.2` dependency. GitHub publishes
-no hosted riscv64 runner, so the build, the floor assertions and the behavioral
-tests (against Debian's packaged Node 20, a hardened libnode build whose getter
-carries the compressed frame record — `c.addi; c.sdsp; c.addi4spn; c.ldsp;
-ld; c.ret`) all run in that container under QEMU user-mode emulation on the x64
-runner. Electron ships no riscv64 builds and the official distro image
-manifests publish no riscv64 variants, so Electron and the distro census
-explicitly exclude the platform; its decoder fixtures come from the gcc-14
-riscv64 toolchain and Debian's shipped binary shapes.
+this platform's artifact records no `libdl.so.2` dependency. The behavioral
+tests run the cross-compiled prebuilds inside a riscv64 Debian trixie
+container under QEMU against Debian's packaged Node 20 — a hardened libnode
+build whose getter carries the compressed frame record (`c.addi; c.sdsp;
+c.addi4spn; c.ldsp; ld; c.ret`). Electron ships no riscv64 builds and the
+distro census has not been evaluated on riscv64, so both explicitly exclude
+the platform; its decoder fixtures come from the gcc-14 riscv64 toolchain and
+Debian's shipped binary shapes.
 
 Distribution-packaged Node is also covered on Linux. It is not merely a
 different version: Fedora ships Node as a thin `/usr/bin/node` linked against a

@@ -16,4 +16,3 @@ node_modules/
 pnpm-publish-summary.json
 *.log
 *.tsbuildinfo
-ts-cjs/

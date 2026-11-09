@@ -149,8 +149,9 @@ pnpm test:optional
 
 两个产品系列都会为每个受支持的平台发布一个 `napi-v9` 二进制文件，
 并在 Node 20、22、24 和 26 上进行测试。Linux GNU 预构建包要求 glibc 2.28 或更新版本，
-以及兼容 `GLIBCXX_3.4.25` 的 C++ 运行时；`linux-riscv64-gnu` 例外，它没有 manylinux
-基线，保证的是其 Debian trixie 构建产出的下限（`GLIBC_2.34`、`GLIBCXX_3.4.26`，见
+以及兼容 `GLIBCXX_3.4.25` 的 C++ 运行时；`linux-riscv64-gnu` 例外，它以 glibc 2.39
+sysroot 交叉编译（即 `manylinux_2_39` riscv64 基线：Ubuntu 24.04+、Debian 13+、
+Fedora 40+），保证的是该构建产出的下限（`GLIBC_2.34`、`GLIBCXX_3.4.26`，见
 [docs/support-matrix.md](docs/support-matrix.md)）。目前尚未发布 Linux musl 预构建包。
 Node.js 在 v22 之后停止提供 32 位 Windows 二进制文件，因此 `win32-ia32-msvc`
 仅覆盖 Node 20 和 22。

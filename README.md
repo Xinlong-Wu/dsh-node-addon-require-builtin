@@ -168,8 +168,9 @@ The supported optional prebuild target set is intentionally conservative:
 Both product families publish one `napi-v9` binary per supported platform,
 tested across Node 20, 22, 24, and 26. Linux GNU prebuilds require glibc 2.28 or
 newer and a `GLIBCXX_3.4.25`-compatible C++ runtime, except `linux-riscv64-gnu`,
-which has no manylinux baseline and instead guarantees the floors its Debian
-trixie build emits (`GLIBC_2.34`, `GLIBCXX_3.4.26`; see
+which is cross-compiled against a glibc 2.39 sysroot (the `manylinux_2_39`
+riscv64 baseline: Ubuntu 24.04+, Debian 13+, Fedora 40+) and guarantees the
+floors that build emits (`GLIBC_2.34`, `GLIBCXX_3.4.26`; see
 [docs/support-matrix.md](docs/support-matrix.md)). Linux musl prebuilds are built
 and tested on Alpine 3.23, including npm installs on musl Node 20/22/24/26.
 Node.js stopped shipping 32-bit Windows binaries after v22, so
