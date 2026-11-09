@@ -66,6 +66,9 @@ importers:
       node-addon-internal-loader-linux-arm64-musl:
         specifier: workspace:*
         version: link:../linux-arm64-musl
+      node-addon-internal-loader-linux-riscv64-gnu:
+        specifier: workspace:*
+        version: link:../linux-riscv64-gnu
       node-addon-internal-loader-linux-x64-gnu:
         specifier: workspace:*
         version: link:../linux-x64-gnu
@@ -89,6 +92,12 @@ importers:
         version: link:../../loader
 
   packages/internal-loader/linux-arm64-musl:
+    dependencies:
+      node-addon-native-custom-loader:
+        specifier: workspace:*
+        version: link:../../loader
+
+  packages/internal-loader/linux-riscv64-gnu:
     dependencies:
       node-addon-native-custom-loader:
         specifier: workspace:*
@@ -156,6 +165,9 @@ importers:
       node-addon-require-builtin-linux-arm64-musl:
         specifier: workspace:*
         version: link:../linux-arm64-musl
+      node-addon-require-builtin-linux-riscv64-gnu:
+        specifier: workspace:*
+        version: link:../linux-riscv64-gnu
       node-addon-require-builtin-linux-x64-gnu:
         specifier: workspace:*
         version: link:../linux-x64-gnu
@@ -179,6 +191,12 @@ importers:
         version: link:../../loader
 
   packages/require-builtin/linux-arm64-musl:
+    dependencies:
+      node-addon-native-custom-loader:
+        specifier: workspace:*
+        version: link:../../loader
+
+  packages/require-builtin/linux-riscv64-gnu:
     dependencies:
       node-addon-native-custom-loader:
         specifier: workspace:*
