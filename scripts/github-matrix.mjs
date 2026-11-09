@@ -10,6 +10,9 @@ const RUNNERS = {
   'darwin-x64': 'macos-15-intel',
   'linux-arm64-gnu': 'ubuntu-24.04-arm',
   'linux-arm64-musl': 'ubuntu-24.04-arm',
+  // GitHub publishes no hosted riscv64 runner: the prebuild is built and
+  // tested inside a riscv64 Debian container under QEMU (see ci.yml).
+  'linux-riscv64-gnu': 'ubuntu-24.04',
   'linux-x64-gnu': 'ubuntu-24.04',
   'linux-x64-musl': 'ubuntu-24.04',
   'win32-arm64-msvc': 'windows-11-vs2026-arm',
@@ -17,6 +20,19 @@ const RUNNERS = {
   // runner/toolset update cannot silently raise the prebuild's OS baseline.
   'win32-ia32-msvc': 'windows-2022',
   'win32-x64-msvc': 'windows-2022',
+};
+
+// Symbol-version floors the compatibility check asserts from readelf output.
+// x64/arm64 are pinned by the manylinux_2_28 build container (glibc 2.28,
+// GLIBCXX 3.4.25). The riscv64 prebuild is built inside the riscv64 Debian
+// trixie container (glibc 2.41, gcc 14.2) under QEMU, and the floors below are
+// what that toolchain's output actually references (measured; see
+// docs/support-matrix.md).
+const GLIBC_FLOOR = {
+  'linux-riscv64-gnu': '2.34',
+};
+const GLIBCXX_FLOOR = {
+  'linux-riscv64-gnu': '3.4.26',
 };
 
 const NODE_ARCH = {
@@ -66,6 +82,8 @@ function platformEntry(family, dir) {
     // stay distinct through upload/download.
     artifact: `prebuild-${family}-${platform}-napi-v9`,
     prebuilt_path: `${dir}/prebuilt`,
+    glibc_floor: GLIBC_FLOOR[platform] || '2.28',
+    glibcxx_floor: GLIBCXX_FLOOR[platform] || '3.4.25',
   };
   if (!entry.runner) {
     throw new Error(`missing GitHub runner for platform: ${platform}`);
@@ -110,6 +128,8 @@ function ciPlatformMatrix() {
           // it encodes only platform and ABI.
           filename: entry.filename,
           families: FAMILIES.join(' '),
+          glibc_floor: entry.glibc_floor,
+          glibcxx_floor: entry.glibcxx_floor,
           // Artifact names must stay per family because downstream jobs (hmr,
           // distro-node) resolve them by name. upload-artifact takes one name per
           // step, so ci.yml has one upload step per entry here; adding a family
@@ -133,9 +153,12 @@ function hmrPlatformMatrix() {
   // runs against the whitelisted internal-loader product only.
   const family = 'internal-loader';
   return {
-    // The HMR driver runs on the host, whose Linux Node uses glibc.
+    // The HMR driver runs on the host, whose Linux Node uses glibc. riscv64
+    // prebuilds cannot execute on the hosted x64/arm64 runners outside a
+    // container, so the platform is excluded until a native runner exists;
+    // backend.test.js under QEMU covers the same binding on that arch.
     include: platformDirsFor(family)
-      .filter((dir) => !dir.endsWith('-musl'))
+      .filter((dir) => !dir.endsWith('-musl') && !dir.includes('riscv64'))
       .map((dir) => platformEntry(family, dir)),
   };
 }
@@ -345,6 +368,11 @@ function distroPlatformMatrix() {
     for (const dir of platformDirsFor(family)) {
       const platform = path.basename(dir);
       if (!platform.startsWith('linux-')) continue;
+      // The distro census predates riscv64 distro images and has not been
+      // evaluated on the architecture; ci.yml's riscv64 job already tests
+      // against Debian trixie's packaged Node, which is the hardened-build
+      // shape this matrix exists to cover.
+      if (platform.includes('riscv64')) continue;
       if (platforms.has(platform)) continue;
       const entry = platformEntry(family, dir);
       platforms.set(platform, {
@@ -406,6 +434,24 @@ function packageInstallMatrix() {
     const arch = entry.platform.split('-')[1];
     const linux = entry.platform.startsWith('linux-');
     const libc = linux ? entry.platform.split('-')[2] : '';
+    // No official node:<maj> image publishes a riscv64 manifest, so the
+    // platform is verified once against Debian trixie's packaged Node 20 in
+    // the riscv64 Debian image (prepared with Node before the offline run —
+    // see packages.yml). The remaining platforms fan out over the Node majors.
+    if (entry.platform === 'linux-riscv64-gnu') {
+      include.push({
+        platform: entry.platform,
+        runner: entry.runner,
+        arch,
+        node: 20,
+        nodearch: arch,
+        libc,
+        image: 'riscv64/debian:trixie',
+        docker_platform: 'linux/riscv64',
+        runtime_prep: 'debian-node',
+      });
+      continue;
+    }
     const majors = entry.platform === 'win32-ia32-msvc' ? [20, 22] : [20, 22, 24, 26];
     for (const node of majors) {
       include.push({

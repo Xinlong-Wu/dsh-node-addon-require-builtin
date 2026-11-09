@@ -41,6 +41,15 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # No hosted riscv64 runner exists: the prebuild is built and tested
+      # inside a riscv64 Debian container under QEMU (see ci.yml for the full
+      # rationale).
+      - name: Set up QEMU (riscv64 emulation)
+        if: matrix.platform == 'linux-riscv64-gnu'
+        uses: docker/setup-qemu-action@v3
+        with:
+          platforms: riscv64
+
       - uses: pnpm/action-setup@v4
         with:
           version: 9.15.9
@@ -65,6 +74,15 @@ jobs:
       - name: Build TypeScript entrypoints
         run: pnpm build:ts
 
+      - name: Transpile the build script to plain JS for the riscv64 container
+        if: matrix.platform == 'linux-riscv64-gnu'
+        run: |
+          # The riscv64 container runs Debian's own Node 20, which cannot
+          # execute the host tsx binary; see ci.yml.
+          npx tsc scripts/build.ts scripts/path-utils.ts --module node16 \
+            --moduleResolution node16 --target es2022 --esModuleInterop \
+            --skipLibCheck --outDir ts-cjs
+
       - name: Select VS2022-compatible ARM64 toolchain
         if: matrix.platform == 'win32-arm64-msvc'
         shell: pwsh
@@ -77,7 +95,7 @@ jobs:
           npm_config_msvs_version: ${{ matrix.platform == 'win32-arm64-msvc' && env.npm_config_msvs_version || runner.os == 'Windows' && '2022' || '' }}
 
       - name: Build and test N-API prebuild on glibc 2.28
-        if: runner.os == 'Linux'
+        if: runner.os == 'Linux' && matrix.platform != 'linux-riscv64-gnu'
         shell: bash
         run: |
           case "$RUNNER_ARCH" in
@@ -114,6 +132,36 @@ jobs:
                 node --expose-internals ./test/require-parity.test.js
             '
 
+      - name: Build and test N-API prebuild under riscv64 emulation
+        if: runner.os == 'Linux' && matrix.platform == 'linux-riscv64-gnu'
+        shell: bash
+        run: |
+          # Built with the container's own gcc against its glibc 2.41
+          # toolchain; floors asserted below. See ci.yml for the full
+          # rationale.
+          image=riscv64/debian:trixie
+          docker pull --platform linux/riscv64 "$image"
+          docker run --rm --platform linux/riscv64 \
+            --env NARB_PRODUCT \
+            --volume "$GITHUB_WORKSPACE:/workspace" \
+            --workdir /workspace \
+            "$image" \
+            bash -ceu '
+              export DEBIAN_FRONTEND=noninteractive
+              apt-get update -qq
+              apt-get install -y -qq --no-install-recommends g++ nodejs libnode-dev >/dev/null
+              export CXX=g++
+              mkdir -p "packages/${{ matrix.family }}/linux-riscv64-gnu/node_modules"
+              ln -sfn ../../../loader \
+                "packages/${{ matrix.family }}/linux-riscv64-gnu/node_modules/node-addon-native-custom-loader"
+              NARB_BUILD_OUTPUT=prebuild node ts-cjs/build.js
+              env -u LD_LIBRARY_PATH \
+                NARB_EXPECTED_BACKEND=napi NARB_DISABLE_LOCAL_BUILD=1 \
+                node ./test/backend.test.js
+              env -u LD_LIBRARY_PATH NARB_DISABLE_LOCAL_BUILD=1 \
+                node --expose-internals ./test/require-parity.test.js
+            '
+
       - name: Check N-API prebuild output
         run: |
           node -e "const fs = require('node:fs'); const file = '${{ matrix.prebuilt_path }}/${{ matrix.filename }}'; if (!fs.existsSync(file)) throw new Error('missing prebuild: ' + file);"
@@ -131,8 +179,9 @@ jobs:
             echo "no GLIBC version requirements found in $file" >&2
             exit 1
           fi
-          if [ "$(printf '%s\n' 2.28 "$max_glibc" | sort -V | tail -n 1)" != 2.28 ]; then
-            echo "glibc floor regressed: GLIBC_$max_glibc is newer than GLIBC_2.28" >&2
+          floor='${{ matrix.glibc_floor }}'
+          if [ "$(printf '%s\n' "$floor" "$max_glibc" | sort -V | tail -n 1)" != "$floor" ]; then
+            echo "glibc floor regressed: GLIBC_$max_glibc is newer than GLIBC_$floor" >&2
             exit 1
           fi
 
@@ -144,16 +193,21 @@ jobs:
             echo "no GLIBCXX version requirements found in $file" >&2
             exit 1
           fi
-          if [ "$(printf '%s\n' 3.4.25 "$max_glibcxx" | sort -V | tail -n 1)" != 3.4.25 ]; then
-            echo "libstdc++ floor regressed: GLIBCXX_$max_glibcxx is newer than GLIBCXX_3.4.25" >&2
+          cxxfloor='${{ matrix.glibcxx_floor }}'
+          if [ "$(printf '%s\n' "$cxxfloor" "$max_glibcxx" | sort -V | tail -n 1)" != "$cxxfloor" ]; then
+            echo "libstdc++ floor regressed: GLIBCXX_$max_glibcxx is newer than GLIBCXX_$cxxfloor" >&2
             exit 1
           fi
 
           dynamic="$(readelf --dynamic "$file")"
-          grep -q 'Shared library: \[libdl.so.2\]' <<<"$dynamic" || {
-            echo "Linux prebuild does not declare its libdl.so.2 dependency" >&2
-            exit 1
-          }
+          # glibc 2.34 folded libdl into libc, so a build against the riscv64
+          # baseline (Debian trixie, glibc 2.41) records no libdl.so.2 NEED.
+          if [ "${{ matrix.platform }}" != 'linux-riscv64-gnu' ]; then
+            grep -q 'Shared library: \[libdl.so.2\]' <<<"$dynamic" || {
+              echo "Linux prebuild does not declare its libdl.so.2 dependency" >&2
+              exit 1
+            }
+          fi
           if ! grep -q 'Shared library: \[libstdc++\.so\.6\]' <<<"$dynamic"; then
             echo "Linux prebuild does not declare its shared libstdc++ runtime" >&2
             exit 1

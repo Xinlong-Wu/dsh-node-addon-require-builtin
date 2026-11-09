@@ -49,6 +49,9 @@ Result<CurrentContextRead> ReadDarwinX64CurrentV8Context(
 Result<CurrentContextRead> ReadLinuxArm64CurrentV8Context(
     void* isolate,
     const CurrentContextSymbols& symbols);
+Result<CurrentContextRead> ReadLinuxRiscv64CurrentV8Context(
+    void* isolate,
+    const CurrentContextSymbols& symbols);
 Result<CurrentContextRead> ReadLinuxX64CurrentV8Context(
     void* isolate,
     const CurrentContextSymbols& symbols);

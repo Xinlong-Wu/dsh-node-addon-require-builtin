@@ -5,11 +5,14 @@
 // ones we thought to hand-assemble. Two sources:
 //
 //   * synthetic  - a probe with the same shape as the real accessor, compiled
-//                  under a matrix of optimization and hardening flags.
+//                  under a matrix of optimization and hardening flags. The
+//                  Fedora entry uses that distribution's verbatim
+//                  `rpm --eval %{build_cflags}`, and reproduces its shipped
+//                  getter byte for byte.
 //   * real binary - bytes read straight out of a shipped libnode/node. These
-//                  are authoritative: no flag combination on a standalone
-//                  probe reproduces the frame record LTO gives Fedora, and
-//                  each binary carries its own field offset.
+//                  are authoritative for the field offset, which moves between
+//                  Node versions (0x1f8 on 24, 0x208 on 26) and which no probe
+//                  can predict.
 //
 // expected_offset is computed by an independent decoder in the generator, so a
 // disagreement with the C++ decoder is a real signal, not a shared assumption.
@@ -20,6 +23,7 @@
 // arm64 / fedora44-libnode: 2 distinct shapes from 2 configurations
 // arm64 / official-nodejs-org: 2 distinct shapes from 2 configurations
 // x64 / fedora44-libnode: 1 distinct shapes from 1 configurations
+// riscv64 / gcc-14: 4 distinct shapes from 30 configurations
 
 struct GetterFixture {
   const char* arch;
@@ -371,6 +375,53 @@ const unsigned char kFx_x64_fedora44_libnode_0[] = {
     0xf3, 0x0f, 0x1e, 0xfa, 0x48, 0x8b, 0x87, 0x00,
     0x02, 0x00, 0x00, 0xc3,
 };
+// -O0
+// -O0 -fno-omit-frame-pointer
+// -O0 -mno-omit-leaf-frame-pointer
+// -O0 -fno-omit-frame-pointer -mno-omit-leaf-frame-pointer
+// -O0 -fstack-protector-strong
+// -O0 -fstack-clash-protection
+const unsigned char kFx_riscv64_gcc_14_0[] = {
+    0x01, 0x11, 0x06, 0xec, 0x22, 0xe8, 0x00, 0x10,
+    0x23, 0x34, 0xa4, 0xfe,
+};
+// -O1
+// -O1 -mno-omit-leaf-frame-pointer
+// -O1 -fstack-protector-strong
+// -O1 -fstack-clash-protection
+// -O2
+// -O2 -mno-omit-leaf-frame-pointer
+// -O2 -fstack-protector-strong
+// -O2 -fstack-clash-protection
+// -O3
+// -O3 -mno-omit-leaf-frame-pointer
+// -O3 -fstack-protector-strong
+// -O3 -fstack-clash-protection
+// -Os
+// -Os -mno-omit-leaf-frame-pointer
+// -Os -fstack-protector-strong
+// -Os -fstack-clash-protection
+const unsigned char kFx_riscv64_gcc_14_1[] = {
+    0x03, 0x35, 0x05, 0x20, 0x82, 0x80,
+};
+// -O1 -fno-omit-frame-pointer
+// -O1 -fno-omit-frame-pointer -mno-omit-leaf-frame-pointer
+const unsigned char kFx_riscv64_gcc_14_2[] = {
+    0x41, 0x11, 0x06, 0xe4, 0x22, 0xe0, 0x00, 0x08,
+    0x03, 0x35, 0x05, 0x20, 0xa2, 0x60, 0x02, 0x64,
+    0x41, 0x01, 0x82, 0x80,
+};
+// -O2 -fno-omit-frame-pointer
+// -O2 -fno-omit-frame-pointer -mno-omit-leaf-frame-pointer
+// -O3 -fno-omit-frame-pointer
+// -O3 -fno-omit-frame-pointer -mno-omit-leaf-frame-pointer
+// -Os -fno-omit-frame-pointer
+// -Os -fno-omit-frame-pointer -mno-omit-leaf-frame-pointer
+const unsigned char kFx_riscv64_gcc_14_3[] = {
+    0x41, 0x11, 0x22, 0xe0, 0x06, 0xe4, 0x00, 0x08,
+    0xa2, 0x60, 0x02, 0x64, 0x03, 0x35, 0x05, 0x20,
+    0x41, 0x01, 0x82, 0x80,
+};
 
 const GetterFixture kGetterFixtures[] = {
     {"arm64", "apple-clang-21", "-O0 (+5 more)", kFx_arm64_apple_clang_21_0, 32, 0, false},
@@ -403,4 +454,8 @@ const GetterFixture kGetterFixtures[] = {
     {"arm64", "official-nodejs-org", "real binary", kFx_arm64_official_nodejs_org_0, 12, 504, true},
     {"arm64", "official-nodejs-org", "real binary", kFx_arm64_official_nodejs_org_1, 12, 520, true},
     {"x64", "fedora44-libnode", "real binary", kFx_x64_fedora44_libnode_0, 12, 512, true},
+    {"riscv64", "gcc-14", "-O0 (+5 more)", kFx_riscv64_gcc_14_0, 12, 0, false},
+    {"riscv64", "gcc-14", "-O1 (+15 more)", kFx_riscv64_gcc_14_1, 6, 512, true},
+    {"riscv64", "gcc-14", "-O1 -fno-omit-frame-pointer (+1 more)", kFx_riscv64_gcc_14_2, 20, 512, true},
+    {"riscv64", "gcc-14", "-O2 -fno-omit-frame-pointer (+5 more)", kFx_riscv64_gcc_14_3, 20, 512, true},
 };

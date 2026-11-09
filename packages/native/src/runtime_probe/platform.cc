@@ -10,6 +10,8 @@ Result<GetterPattern> ParseBuiltinModuleRequireGetterOffset(void* getter) {
   return ParseDarwinX64BuiltinModuleRequireGetterOffset(getter);
 #elif defined(__linux__) && defined(__aarch64__)
   return ParseLinuxArm64BuiltinModuleRequireGetterOffset(getter);
+#elif defined(__linux__) && defined(__riscv) && (__riscv_xlen == 64)
+  return ParseLinuxRiscv64BuiltinModuleRequireGetterOffset(getter);
 #elif defined(__linux__) && defined(__x86_64__)
   return ParseLinuxX64BuiltinModuleRequireGetterOffset(getter);
 #elif defined(__linux__)

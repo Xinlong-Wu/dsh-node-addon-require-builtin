@@ -41,6 +41,7 @@
     "node-addon-require-builtin-darwin-x64": "workspace:*",
     "node-addon-require-builtin-linux-arm64-gnu": "workspace:*",
     "node-addon-require-builtin-linux-arm64-musl": "workspace:*",
+    "node-addon-require-builtin-linux-riscv64-gnu": "workspace:*",
     "node-addon-require-builtin-linux-x64-gnu": "workspace:*",
     "node-addon-require-builtin-linux-x64-musl": "workspace:*",
     "node-addon-require-builtin-win32-arm64-msvc": "workspace:*",

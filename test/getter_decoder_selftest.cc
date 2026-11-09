@@ -1,6 +1,6 @@
-// Standalone verification for the x64/arm64/x86 getter decoders. Feeds each decoder
-// the exact machine-code shapes the per-platform parsers recognize and asserts
-// the decoded offset and call mode. The decoders are host-architecture
+// Standalone verification for the x64/arm64/riscv64/x86 getter decoders. Feeds each
+// decoder the exact machine-code shapes the per-platform parsers recognize and
+// asserts the decoded offset and call mode. The decoders are host-architecture
 // independent, so this runs on any build host regardless of the target it
 // decodes for. Compiled and run by scripts/test-getter-decoder.ts.
 #include "runtime_probe/getter_decoder.h"
@@ -15,6 +15,7 @@ using esplus::node::require_builtin::GetterPattern;
 using esplus::node::require_builtin::MatchArm64AapcsFieldGetter;
 using esplus::node::require_builtin::MatchArm64FieldGetter;
 using esplus::node::require_builtin::MatchArm64Win64FieldGetter;
+using esplus::node::require_builtin::MatchRiscv64FieldGetter;
 using esplus::node::require_builtin::MatchX64SysVFieldGetter;
 using esplus::node::require_builtin::MatchX64Win64FieldGetter;
 using esplus::node::require_builtin::MatchX86ThiscallFieldGetter;
@@ -146,6 +147,44 @@ std::vector<uint32_t> Arm64Words(std::vector<uint32_t> words_in,
   words_in.resize(words, 0);
   return words_in;
 }
+
+// Little-endian instruction encoders for the mixed-width RV64 bodies: rv64gc
+// emits RVC compressed 16-bit instructions interleaved with 32-bit ones, so a
+// test body is a byte stream rather than a word array.
+void PushRiscv64Half(std::vector<uint8_t>* out, uint16_t insn) {
+  out->push_back(static_cast<uint8_t>(insn & 0xff));
+  out->push_back(static_cast<uint8_t>((insn >> 8) & 0xff));
+}
+
+void PushRiscv64Word(std::vector<uint8_t>* out, uint32_t insn) {
+  PushRiscv64Half(out, static_cast<uint16_t>(insn & 0xffff));
+  PushRiscv64Half(out, static_cast<uint16_t>(insn >> 16));
+}
+
+// riscv64 encodings used repeatedly below, each verified against the output of
+// riscv64 gcc-14 / GNU as (the fixture matrix archives bytes from the same
+// toolchain, so the hand-assembled shapes and the archived ones agree).
+constexpr uint16_t kCAddiSpMinus16 = 0x1141u;     // c.addi sp,-16 (GCC's adjust)
+constexpr uint16_t kCAddiSpPlus16 = 0x0141u;      // c.addi sp,16
+constexpr uint16_t kCAddi16SpMinus16 = 0x717du;   // c.addi16sp sp,-16
+constexpr uint16_t kCAddi16SpPlus16 = 0x6141u;    // c.addi16sp sp,16
+constexpr uint16_t kCAddi4SpnS0Plus16 = 0x0800u;  // c.addi4spn s0,sp,16
+constexpr uint16_t kCAddi4SpnA0Plus16 = 0x0808u;  // c.addi4spn a0,sp,16
+constexpr uint16_t kCSdSpRa8 = 0xe406u;           // c.sdsp ra,8(sp)
+constexpr uint16_t kCSdSpS00 = 0xe022u;           // c.sdsp s0,0(sp)
+constexpr uint16_t kCLdSpRa8 = 0x60a2u;           // c.ldsp ra,8(sp)
+constexpr uint16_t kCLdSpS00 = 0x6402u;           // c.ldsp s0,0(sp)
+constexpr uint16_t kCAddS0Sp = 0x940au;           // c.add s0,sp (mv s0,sp)
+constexpr uint16_t kCRet = 0x8082u;               // c.ret (c.jr ra)
+constexpr uint32_t kRet = 0x00008067u;            // jalr zero,0(ra)
+constexpr uint32_t kLpad = 0x00001017u;           // auipc zero (Zicfilp lpad)
+constexpr uint32_t kLdA0Offset = 0x1c053503u;     // ld a0,0x1c0(a0)
+constexpr uint32_t kSdRaSp8 = 0x00113423u;        // sd ra,8(sp)
+constexpr uint32_t kLdRaSp8 = 0x00813083u;        // ld ra,8(sp)
+constexpr uint32_t kLdS0Sp0 = 0x00013403u;        // ld s0,0(sp)
+constexpr uint32_t kAddiS0Sp16 = 0x01010413u;     // addi s0,sp,16
+constexpr uint32_t kAddiSpSpMinus16 = 0xff010113u;
+constexpr uint32_t kAddiSpSpPlus16 = 0x01010113u;
 
 }  // namespace
 
@@ -545,6 +584,265 @@ int main() {
                        .data(),
                    "test"));
 
+  // --- riscv64: ld a0,imm(a0) then ret/c.ret, RVC-aware ------------------
+  // Plain uncompressed body: ld a0,0x1c0(a0); ret (8 bytes).
+  {
+    std::vector<uint8_t> code;
+    PushRiscv64Word(&code, kLdA0Offset);
+    PushRiscv64Word(&code, kRet);
+    ExpectPattern("riscv64 ld-a0-[this]-ret",
+                  MatchRiscv64FieldGetter(Pad16(code).data(), "test", 16),
+                  0x1c0, "test ld-a0-[this-imm]-ret");
+  }
+
+  // Fully compressed body: c.ld a0,0x18(a0); c.ret (4 bytes). The RVC
+  // immediate is the byte offset divided by 8: 0x18/8 = 3 -> 0x6108.
+  {
+    std::vector<uint8_t> code;
+    PushRiscv64Half(&code, 0x6d08u);
+    PushRiscv64Half(&code, kCRet);
+    ExpectPattern("riscv64 c.ld-a0-[this]-c.ret",
+                  MatchRiscv64FieldGetter(Pad16(code).data(), "test", 16),
+                  0x18, "test c.ld-a0-[this-imm]-c.ret");
+  }
+
+  // Mixed widths in either order. c.ld a0,0xf8(a0) is the largest compressed
+  // offset (uimm=31 -> 0x7d68); pairing it with an uncompressed ret and an
+  // uncompressed load with c.ret both exercise the quadrant switch mid-body.
+  {
+    std::vector<uint8_t> code;
+    PushRiscv64Half(&code, 0x7d68u);
+    PushRiscv64Word(&code, kRet);
+    ExpectPattern("riscv64 c.ld-a0-[this]-ret (mixed)",
+                  MatchRiscv64FieldGetter(Pad16(code).data(), "test", 16),
+                  0xf8, "test c.ld-a0-[this-imm]-ret");
+  }
+  {
+    std::vector<uint8_t> code;
+    PushRiscv64Word(&code, 0x20053503u);  // ld a0,0x200(a0)
+    PushRiscv64Half(&code, kCRet);
+    ExpectPattern("riscv64 ld-a0-[this]-c.ret (mixed)",
+                  MatchRiscv64FieldGetter(Pad16(code).data(), "test", 16),
+                  0x200, "test ld-a0-[this-imm]-c.ret");
+  }
+
+  // Zicfilp landing pad ahead of the load fits the standard window.
+  {
+    std::vector<uint8_t> code;
+    PushRiscv64Word(&code, kLpad);
+    PushRiscv64Word(&code, kLdA0Offset);
+    PushRiscv64Word(&code, kRet);
+    ExpectPattern("riscv64 lpad-ld-a0-[this]-ret",
+                  MatchRiscv64FieldGetter(Pad16(code).data(), "test", 16),
+                  0x1c0, "test lpad-ld-a0-[this-imm]-ret");
+  }
+
+  // Compressed frame record, 18 bytes — gcc-14's actual emitted getter body
+  // under -fno-omit-frame-pointer, archived byte for byte in the fixture
+  // matrix: c.addi sp,-16; c.sdsp ra,8(sp); c.sdsp s0,0(sp); c.addi4spn
+  // s0,16; c.ld a0,0x18(a0); c.ldsp ra,8(sp); c.ldsp s0,0(sp); c.addi sp,16;
+  // c.ret. Too long for the standard window, resolved by the wide one.
+  {
+    std::vector<uint8_t> code;
+    PushRiscv64Half(&code, kCAddiSpMinus16);
+    PushRiscv64Half(&code, kCSdSpRa8);
+    PushRiscv64Half(&code, kCSdSpS00);
+    PushRiscv64Half(&code, kCAddi4SpnS0Plus16);
+    PushRiscv64Half(&code, 0x6d08u);
+    PushRiscv64Half(&code, kCLdSpRa8);
+    PushRiscv64Half(&code, kCLdSpS00);
+    PushRiscv64Half(&code, kCAddiSpPlus16);
+    PushRiscv64Half(&code, kCRet);
+    ExpectReject("riscv64 compressed frame rejected in narrow window",
+                 MatchRiscv64FieldGetter(Pad32(code).data(), "test", 16));
+    ExpectPattern("riscv64 compressed frame in wide window",
+                  MatchRiscv64FieldGetter(Pad32(code).data(), "test", 32),
+                  0x18, "test frame-c.ld-a0-[this-imm]-c.ret");
+  }
+
+  // Landing pad before the load of the framed body (22 bytes), and the
+  // c.addi16sp sp-adjust form a toolchain can emit instead of plain c.addi.
+  {
+    std::vector<uint8_t> code;
+    PushRiscv64Half(&code, kCAddi16SpMinus16);
+    PushRiscv64Half(&code, kCSdSpRa8);
+    PushRiscv64Half(&code, kCSdSpS00);
+    PushRiscv64Half(&code, kCAddi4SpnS0Plus16);
+    PushRiscv64Word(&code, kLpad);
+    PushRiscv64Half(&code, 0x6d08u);
+    PushRiscv64Half(&code, kCLdSpRa8);
+    PushRiscv64Half(&code, kCLdSpS00);
+    PushRiscv64Half(&code, kCAddi16SpPlus16);
+    PushRiscv64Half(&code, kCRet);
+    ExpectPattern("riscv64 lpad compressed frame in wide window",
+                  MatchRiscv64FieldGetter(Pad32(code).data(), "test", 32),
+                  0x18, "test lpad-frame-c.ld-a0-[this-imm]-c.ret");
+  }
+
+  // A c.addi4spn that rebases `this` (a0) instead of setting up the frame
+  // pointer must fail closed: the field load would read from sp+N.
+  {
+    std::vector<uint8_t> code;
+    PushRiscv64Half(&code, kCAddiSpMinus16);
+    PushRiscv64Half(&code, kCAddi4SpnA0Plus16);
+    PushRiscv64Half(&code, 0x6d08u);
+    PushRiscv64Half(&code, kCRet);
+    ExpectReject("riscv64 c-addi4spn rebases a0",
+                 MatchRiscv64FieldGetter(Pad32(code).data(), "test", 32));
+  }
+
+  // Frame record mixing compressed and uncompressed instructions (28 bytes):
+  // c.addi16sp sp,-16; sd ra,8(sp); c.sdsp s0,0(sp); c.add s0,sp;
+  // ld a0,0x1c0(a0); ld ra,8(sp); ld s0,0(sp); c.addi16sp sp,16; ret.
+  {
+    std::vector<uint8_t> code;
+    PushRiscv64Half(&code, kCAddi16SpMinus16);
+    PushRiscv64Word(&code, kSdRaSp8);
+    PushRiscv64Half(&code, kCSdSpS00);
+    PushRiscv64Half(&code, kCAddS0Sp);
+    PushRiscv64Word(&code, kLdA0Offset);
+    PushRiscv64Word(&code, kLdRaSp8);
+    PushRiscv64Word(&code, kLdS0Sp0);
+    PushRiscv64Half(&code, kCAddi16SpPlus16);
+    PushRiscv64Word(&code, kRet);
+    ExpectPattern("riscv64 mixed-width frame in wide window",
+                  MatchRiscv64FieldGetter(Pad32(code).data(), "test", 32),
+                  0x1c0, "test frame-ld-a0-[this-imm]-ret");
+  }
+
+  // A frame record entirely in uncompressed instructions is 36 bytes and falls
+  // outside even the wide window — only reachable from a toolchain that does
+  // not target RVC, which no Linux distribution does. Fails closed.
+  {
+    std::vector<uint8_t> code;
+    PushRiscv64Word(&code, kAddiSpSpMinus16);
+    PushRiscv64Word(&code, kSdRaSp8);
+    PushRiscv64Word(&code, 0x00813023u);  // sd s0,0(sp)
+    PushRiscv64Word(&code, kAddiS0Sp16);
+    PushRiscv64Word(&code, kLdA0Offset);
+    PushRiscv64Word(&code, kLdRaSp8);
+    PushRiscv64Word(&code, kLdS0Sp0);
+    PushRiscv64Word(&code, kAddiSpSpPlus16);
+    PushRiscv64Word(&code, kRet);
+    ExpectReject("riscv64 uncompressed frame beyond wide window",
+                 MatchRiscv64FieldGetter(Pad32(code).data(), "test", 32));
+  }
+
+  // An instruction that rebases `this` is not benign: addi a0,a0,8 -> 0x850513.
+  {
+    std::vector<uint8_t> code;
+    PushRiscv64Word(&code, kLpad);
+    PushRiscv64Word(&code, 0x00850513u);
+    PushRiscv64Word(&code, kLdA0Offset);
+    PushRiscv64Word(&code, kRet);
+    ExpectReject("riscv64 unknown-insn between lpad and load",
+                 MatchRiscv64FieldGetter(Pad32(code).data(), "test", 32));
+  }
+
+  // Two field loads mean this is not a plain accessor.
+  {
+    std::vector<uint8_t> code;
+    PushRiscv64Word(&code, kLdA0Offset);
+    PushRiscv64Word(&code, 0x1c853503u);  // ld a0,0x1c8(a0)
+    PushRiscv64Word(&code, kRet);
+    ExpectReject("riscv64 two-loads",
+                 MatchRiscv64FieldGetter(Pad32(code).data(), "test", 32));
+  }
+
+  // Frame teardown but no load at all.
+  {
+    std::vector<uint8_t> code;
+    PushRiscv64Half(&code, kCAddi16SpMinus16);
+    PushRiscv64Half(&code, kCSdSpRa8);
+    PushRiscv64Half(&code, kCSdSpS00);
+    PushRiscv64Half(&code, kCLdSpRa8);
+    PushRiscv64Half(&code, kCLdSpS00);
+    PushRiscv64Half(&code, kCAddi16SpPlus16);
+    PushRiscv64Half(&code, kCRet);
+    ExpectReject("riscv64 no-load",
+                 MatchRiscv64FieldGetter(Pad32(code).data(), "test", 32));
+  }
+
+  // Runs off the end of the window without ever reaching ret.
+  {
+    std::vector<uint8_t> code;
+    PushRiscv64Word(&code, kLdA0Offset);
+    ExpectReject("riscv64 missing-ret",
+                 MatchRiscv64FieldGetter(Pad32(code).data(), "test", 32));
+  }
+
+  // Offset zero is a vptr read, not a field read: ld a0,0(a0).
+  {
+    std::vector<uint8_t> code;
+    PushRiscv64Word(&code, 0x00053503u);
+    PushRiscv64Word(&code, kRet);
+    ExpectReject("riscv64 zero-offset",
+                 MatchRiscv64FieldGetter(Pad32(code).data(), "test", 32));
+  }
+
+  // A negative load offset sign-extends into something implausible:
+  // ld a0,-8(a0) -> 0xff853503.
+  {
+    std::vector<uint8_t> code;
+    PushRiscv64Word(&code, 0xff853503u);
+    PushRiscv64Word(&code, kRet);
+    ExpectReject("riscv64 negative-offset",
+                 MatchRiscv64FieldGetter(Pad32(code).data(), "test", 32));
+  }
+
+  // Reads the wrong base register: ld a0,0x1c0(a1) -> 0x01c58503.
+  {
+    std::vector<uint8_t> code;
+    PushRiscv64Word(&code, 0x1c058503u);
+    PushRiscv64Word(&code, kRet);
+    ExpectReject("riscv64 wrong-base-register",
+                 MatchRiscv64FieldGetter(Pad32(code).data(), "test", 32));
+  }
+
+  // Loads into a register other than a0: ld a1,0x1c0(a0) -> 0x01c53583. There
+  // is no trailing move to a0 in the accepted set, so the offset cannot be
+  // parsed from a body that discards the load.
+  {
+    std::vector<uint8_t> code;
+    PushRiscv64Word(&code, 0x1c053583u);
+    PushRiscv64Word(&code, kRet);
+    ExpectReject("riscv64 load-into-other-register",
+                 MatchRiscv64FieldGetter(Pad32(code).data(), "test", 32));
+  }
+
+  // A spill reload (ld a0,16(sp)) is stack traffic, not a field read.
+  {
+    std::vector<uint8_t> code;
+    PushRiscv64Word(&code, 0x01013503u);
+    PushRiscv64Word(&code, kRet);
+    ExpectReject("riscv64 spill-reload",
+                 MatchRiscv64FieldGetter(Pad32(code).data(), "test", 32));
+  }
+
+  // c.jr through anything but ra does not terminate a getter.
+  {
+    std::vector<uint8_t> code;
+    PushRiscv64Word(&code, kLdA0Offset);
+    PushRiscv64Half(&code, 0x8282u);  // c.jr t0
+    ExpectReject("riscv64 c-jr-not-ra",
+                 MatchRiscv64FieldGetter(Pad32(code).data(), "test", 32));
+  }
+
+  // A 32-bit instruction truncated at the window edge fails its own way
+  // instead of decoding garbage.
+  {
+    std::vector<uint8_t> code;
+    PushRiscv64Half(&code, kCAddi16SpMinus16);
+    PushRiscv64Half(&code, kCSdSpRa8);
+    PushRiscv64Half(&code, kCSdSpS00);
+    PushRiscv64Word(&code, kLdA0Offset);
+    PushRiscv64Half(&code, kCLdSpRa8);
+    PushRiscv64Half(&code, kCLdSpS00);
+    PushRiscv64Half(&code, 0x0003u);  // first halfword of a 32-bit instruction
+    ExpectReject("riscv64 ends-inside-instruction",
+                 MatchRiscv64FieldGetter(Pad32(code).data(), "test", 32));
+  }
+
   // --- win32-x86 (MSVC __thiscall): this=ecx, sret via ret imm16 ---------
   // Direct: mov eax,[ecx+disp8]; ret  -> 8b 41 <d8> c3
   ExpectOk("win32-x86 direct mov-eax-[ecx]-disp8-ret",
@@ -756,9 +1054,11 @@ int main() {
     std::memcpy(window, fx.bytes, copy);
 
     const bool is_arm64 = std::strcmp(fx.arch, "arm64") == 0;
+    const bool is_riscv64 = std::strcmp(fx.arch, "riscv64") == 0;
     auto match = [&](size_t window_bytes) {
-      return is_arm64 ? MatchArm64AapcsFieldGetter(window, "fx", window_bytes)
-                      : MatchX64SysVFieldGetter(window, "fx", window_bytes);
+      if (is_arm64) return MatchArm64AapcsFieldGetter(window, "fx", window_bytes);
+      if (is_riscv64) return MatchRiscv64FieldGetter(window, "fx", window_bytes);
+      return MatchX64SysVFieldGetter(window, "fx", window_bytes);
     };
 
     int stage = 1;

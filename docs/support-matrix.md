@@ -54,6 +54,7 @@ matrix:
 | `darwin-arm64` | Supported | Supported | Supported | Supported |
 | `darwin-x64` | Supported | Supported | Supported | Supported |
 | `linux-arm64-gnu` | Supported | Supported | Supported | Supported |
+| `linux-riscv64-gnu` | Supported | Supported | Supported | Supported |
 | `linux-x64-gnu` | Supported | Supported | Supported | Supported |
 | `linux-arm64-musl` | Supported | Supported | Supported | Supported |
 | `linux-x64-musl` | Supported | Supported | Supported | Supported |
@@ -69,6 +70,23 @@ The Linux GNU prebuilds target glibc 2.28 and explicitly link `libdl.so.2`.
 They share the process C++ runtime instead of embedding another `libstdc++` or
 `libgcc`. CI builds and loads them against the manylinux 2.28 system libraries
 and rejects artifacts requiring newer than `GLIBC_2.28` or `GLIBCXX_3.4.25`.
+
+`linux-riscv64-gnu` is built inside the riscv64 Debian trixie container
+under QEMU on the hosted x64 runner: GitHub publishes no hosted riscv64
+runner, and QEMU's binfmt registration lets the container's gcc spawn its own
+cc1plus/as/ld children — the same mechanism the Debian/Ubuntu riscv64 ports
+use to build GCC and LLVM. The container's toolchain is glibc 2.41 / gcc 14.2
+(manylinux_2_39 (riscv64, ALPHA) pins glibc 2.39; this build sits on the
+newer trixie baseline), and CI asserts the floors the build actually emits —
+`GLIBC_2.34` and `GLIBCXX_3.4.26`. Because glibc 2.34 folded libdl into libc,
+this platform's artifact records no `libdl.so.2` dependency. The behavioral
+tests run the prebuilds inside the same riscv64 Debian trixie
+container under QEMU against Debian's packaged Node 20 — a hardened libnode
+build whose getter carries the compressed frame record (`c.addi; c.sdsp;
+c.addi4spn; c.ldsp; ld; c.ret`). Electron ships no riscv64 builds and the
+distro census has not been evaluated on riscv64, so both explicitly exclude
+the platform; its decoder fixtures come from the gcc-14 riscv64 toolchain and
+Debian's shipped binary shapes.
 
 Distribution-packaged Node is also covered on Linux. It is not merely a
 different version: Fedora ships Node as a thin `/usr/bin/node` linked against a
@@ -100,9 +118,10 @@ resolves it. What cannot be supported is static linking *combined with* hidden
 private symbols — Amazon Linux's default `nodejs` 18 is built that way, while its
 versioned `nodejs20`/`nodejs22` packages use the shared layout and work.
 
-The decoder's own self-test replays archived machine code from three toolchains
-across an optimization and hardening matrix, plus bytes read out of shipped
-binaries; see `scripts/collect-getter-fixtures.mjs`.
+The decoder's own self-test replays archived machine code from four toolchains
+(x64, arm64 and riscv64 cross gcc, plus Apple clang) across an optimization and
+hardening matrix, plus bytes read out of shipped binaries; see
+`scripts/collect-getter-fixtures.mjs`.
 
 Windows x64 and x86 prebuilds are built and tested on the Windows Server 2022
 runner with VS2022; ARM64 uses the Windows 11 VS2026 runner with the older
@@ -117,6 +136,7 @@ Published backend artifacts for each product family:
 | `darwin-arm64` | `napi-v9` |
 | `darwin-x64` | `napi-v9` |
 | `linux-arm64-gnu` | `napi-v9` |
+| `linux-riscv64-gnu` | `napi-v9` |
 | `linux-x64-gnu` | `napi-v9` |
 | `linux-arm64-musl` | `napi-v9` |
 | `linux-x64-musl` | `napi-v9` |
@@ -124,7 +144,8 @@ Published backend artifacts for each product family:
 | `win32-ia32-msvc` | `napi-v9` |
 | `win32-x64-msvc` | `napi-v9` |
 
-Musl prebuilds use Alpine 3.23. CI and release share one packaging and npm install
+Musl prebuilds use Alpine 3.23; Alpine publishes no riscv64 variant of that
+release, so there is no `linux-riscv64-musl` package. CI and release share one packaging and npm install
 workflow for every platform, covering Node 20, 22, 24 and 26 (Windows ia32: 20/22).
 Linux glibc and musl use separate runtime containers. The loader must resolve
 the matching optional

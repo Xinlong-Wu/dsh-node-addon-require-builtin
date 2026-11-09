@@ -45,6 +45,17 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # GitHub publishes no hosted riscv64 runner: the prebuild is built and
+      # tested inside a riscv64 Debian container on this runner. QEMU's
+      # user-mode emulation must be registered first so the container's gcc
+      # can spawn its own cc1plus/as/ld children — the same binfmt mechanism
+      # the Debian and Ubuntu riscv64 ports use to build GCC and LLVM.
+      - name: Set up QEMU (riscv64 emulation)
+        if: matrix.platform == 'linux-riscv64-gnu'
+        uses: docker/setup-qemu-action@v3
+        with:
+          platforms: riscv64
+
       - uses: pnpm/action-setup@v4
         with:
           version: 9.15.9
@@ -104,7 +115,7 @@ jobs:
           npm_config_msvs_version: ${{ matrix.platform == 'win32-arm64-msvc' && env.npm_config_msvs_version || runner.os == 'Windows' && '2022' || '' }}
 
       - name: Build and test N-API prebuild on glibc 2.28
-        if: runner.os == 'Linux'
+        if: runner.os == 'Linux' && matrix.platform != 'linux-riscv64-gnu'
         shell: bash
         run: |
           case "$RUNNER_ARCH" in
@@ -146,6 +157,62 @@ jobs:
               done
             '
 
+      - name: Transpile the build script to plain JS for the riscv64 container
+        if: matrix.platform == 'linux-riscv64-gnu'
+        run: |
+          # The riscv64 container runs Debian's own Node 20, which cannot
+          # execute the host pnpm install's x64 tsx binary; scripts/build.ts is
+          # transpiled to CJS on the host so the container needs only g++ and
+          # distro Node. The output sits one directory below the root so the
+          # script's __dirname-based repo-root resolution still lands on the
+          # checkout.
+          npx tsc scripts/build.ts scripts/path-utils.ts --module node16 \
+            --moduleResolution node16 --target es2022 --esModuleInterop \
+            --skipLibCheck --outDir ts-cjs
+
+      - name: Build and test N-API prebuild under riscv64 emulation
+        if: runner.os == 'Linux' && matrix.platform == 'linux-riscv64-gnu'
+        shell: bash
+        run: |
+          # Both families are built with the container's own gcc against its
+          # glibc 2.41 toolchain and tested against Debian's packaged Node 20 —
+          # a hardened distro libnode build whose getter carries the compressed
+          # frame record the walking decoder exists for. The floors this
+          # produces are asserted in the compatibility step below.
+          image=riscv64/debian:trixie
+          docker pull --platform linux/riscv64 "$image"
+          docker run --rm --platform linux/riscv64 \
+            --env FAMILIES \
+            --volume "$GITHUB_WORKSPACE:/workspace" \
+            --workdir /workspace \
+            "$image" \
+            bash -ceu '
+              export DEBIAN_FRONTEND=noninteractive
+              apt-get update -qq
+              apt-get install -y -qq --no-install-recommends g++ nodejs libnode-dev >/dev/null
+              export CXX=g++
+              # The host pnpm install skips optional packages whose os/cpu does
+              # not match the x64 runner, so the riscv64 platform packages have
+              # no node_modules link to the shared loader; provide it the way a
+              # real npm install would resolve it.
+              for family in $FAMILIES; do
+                mkdir -p "packages/$family/linux-riscv64-gnu/node_modules"
+                ln -sfn ../../../loader \
+                  "packages/$family/linux-riscv64-gnu/node_modules/node-addon-native-custom-loader"
+              done
+              for family in $FAMILIES; do
+                echo "::group::build and test $family under riscv64 emulation"
+                export NARB_PRODUCT="$family"
+                NARB_BUILD_OUTPUT=prebuild node ts-cjs/build.js
+                env -u LD_LIBRARY_PATH \
+                  NARB_EXPECTED_BACKEND=napi NARB_DISABLE_LOCAL_BUILD=1 \
+                  node ./test/backend.test.js
+                env -u LD_LIBRARY_PATH NARB_DISABLE_LOCAL_BUILD=1 \
+                  node --expose-internals ./test/require-parity.test.js
+                echo "::endgroup::"
+              done
+            '
+
       - name: Verify Linux prebuild compatibility
         if: runner.os == 'Linux'
         shell: bash
@@ -161,8 +228,9 @@ jobs:
               echo "no GLIBC version requirements found in $file" >&2
               exit 1
             fi
-            if [ "$(printf '%s\n' 2.28 "$max_glibc" | sort -V | tail -n 1)" != 2.28 ]; then
-              echo "glibc floor regressed: GLIBC_$max_glibc is newer than GLIBC_2.28" >&2
+            floor="${{ matrix.glibc_floor }}"
+            if [ "$(printf '%s\n' "$floor" "$max_glibc" | sort -V | tail -n 1)" != "$floor" ]; then
+              echo "glibc floor regressed: GLIBC_$max_glibc is newer than GLIBC_$floor" >&2
               exit 1
             fi
 
@@ -174,16 +242,21 @@ jobs:
               echo "no GLIBCXX version requirements found in $file" >&2
               exit 1
             fi
-            if [ "$(printf '%s\n' 3.4.25 "$max_glibcxx" | sort -V | tail -n 1)" != 3.4.25 ]; then
-              echo "libstdc++ floor regressed: GLIBCXX_$max_glibcxx is newer than GLIBCXX_3.4.25" >&2
+            cxxfloor="${{ matrix.glibcxx_floor }}"
+            if [ "$(printf '%s\n' "$cxxfloor" "$max_glibcxx" | sort -V | tail -n 1)" != "$cxxfloor" ]; then
+              echo "libstdc++ floor regressed: GLIBCXX_$max_glibcxx is newer than GLIBCXX_$cxxfloor" >&2
               exit 1
             fi
 
             dynamic="$(readelf --dynamic "$file")"
-            grep -q 'Shared library: \[libdl.so.2\]' <<<"$dynamic" || {
-              echo "Linux prebuild does not declare its libdl.so.2 dependency" >&2
-              exit 1
-            }
+            # glibc 2.34 folded libdl into libc, so a build against the riscv64
+            # baseline (Debian trixie, glibc 2.41) records no libdl.so.2 NEED.
+            if [ "${{ matrix.platform }}" != 'linux-riscv64-gnu' ]; then
+              grep -q 'Shared library: \[libdl.so.2\]' <<<"$dynamic" || {
+                echo "Linux prebuild does not declare its libdl.so.2 dependency" >&2
+                exit 1
+              }
+            fi
             if ! grep -q 'Shared library: \[libstdc++\.so\.6\]' <<<"$dynamic"; then
               echo "Linux prebuild does not declare its shared libstdc++ runtime" >&2
               exit 1
@@ -221,12 +294,14 @@ jobs:
           }
 
       - name: Test N-API prebuild on Node 20
+        if: matrix.platform != 'linux-riscv64-gnu'
         uses: actions/setup-node@v4
         with:
           node-version: 20
           architecture: ${{ matrix.nodearch }}
 
       - name: Test N-API prebuild on Node 20
+        if: matrix.platform != 'linux-riscv64-gnu'
         shell: bash
         run: |
           for family in $FAMILIES; do
@@ -241,12 +316,14 @@ jobs:
           NARB_DISABLE_LOCAL_BUILD: 1
 
       - name: Test N-API prebuild on Node 21
+        if: matrix.platform != 'linux-riscv64-gnu'
         uses: actions/setup-node@v4
         with:
           node-version: 21
           architecture: ${{ matrix.nodearch }}
 
       - name: Test N-API prebuild on Node 21
+        if: matrix.platform != 'linux-riscv64-gnu'
         shell: bash
         run: |
           for family in $FAMILIES; do
@@ -261,12 +338,14 @@ jobs:
           NARB_DISABLE_LOCAL_BUILD: 1
 
       - name: Test N-API prebuild on Node 22
+        if: matrix.platform != 'linux-riscv64-gnu'
         uses: actions/setup-node@v4
         with:
           node-version: 22
           architecture: ${{ matrix.nodearch }}
 
       - name: Test N-API prebuild on Node 22
+        if: matrix.platform != 'linux-riscv64-gnu'
         shell: bash
         run: |
           for family in $FAMILIES; do
@@ -288,7 +367,7 @@ jobs:
           architecture: ${{ matrix.nodearch }}
 
       - name: Test N-API prebuild on Node 23
-        if: matrix.platform != 'win32-ia32-msvc'
+        if: matrix.platform != 'win32-ia32-msvc' && matrix.platform != 'linux-riscv64-gnu'
         shell: bash
         run: |
           for family in $FAMILIES; do
@@ -310,7 +389,7 @@ jobs:
           architecture: ${{ matrix.nodearch }}
 
       - name: Test N-API prebuild on Node 24
-        if: matrix.platform != 'win32-ia32-msvc'
+        if: matrix.platform != 'win32-ia32-msvc' && matrix.platform != 'linux-riscv64-gnu'
         shell: bash
         run: |
           for family in $FAMILIES; do
@@ -332,7 +411,7 @@ jobs:
           architecture: ${{ matrix.nodearch }}
 
       - name: Test N-API prebuild on Node 25
-        if: matrix.platform != 'win32-ia32-msvc'
+        if: matrix.platform != 'win32-ia32-msvc' && matrix.platform != 'linux-riscv64-gnu'
         shell: bash
         run: |
           for family in $FAMILIES; do
@@ -354,7 +433,7 @@ jobs:
           architecture: ${{ matrix.nodearch }}
 
       - name: Test N-API prebuild on Node 26
-        if: matrix.platform != 'win32-ia32-msvc'
+        if: matrix.platform != 'win32-ia32-msvc' && matrix.platform != 'linux-riscv64-gnu'
         shell: bash
         run: |
           for family in $FAMILIES; do
@@ -369,7 +448,7 @@ jobs:
           NARB_DISABLE_LOCAL_BUILD: 1
 
       - name: Set up Node 27 nightly
-        if: matrix.platform != 'win32-ia32-msvc'
+        if: matrix.platform != 'win32-ia32-msvc' && matrix.platform != 'linux-riscv64-gnu'
         uses: actions/setup-node@v4
         with:
           node-version: 27-nightly
@@ -377,7 +456,7 @@ jobs:
           check-latest: true
 
       - name: Test N-API prebuild on Node 27 nightly
-        if: matrix.platform != 'win32-ia32-msvc'
+        if: matrix.platform != 'win32-ia32-msvc' && matrix.platform != 'linux-riscv64-gnu'
         shell: bash
         run: |
           node -p 'JSON.stringify({ node: process.version, v8: process.versions.v8, arch: process.arch })'
@@ -395,16 +474,21 @@ jobs:
       # Keep nodeabi source-build validation on the stable runtime. Windows x86
       # remains on Node 22 because later releases publish no x86 binaries.
       - name: Restore Node 26 for nodeabi source build
-        if: matrix.platform != 'win32-ia32-msvc'
+        if: matrix.platform != 'win32-ia32-msvc' && matrix.platform != 'linux-riscv64-gnu'
         uses: actions/setup-node@v4
         with:
           node-version: 26
           architecture: ${{ matrix.nodearch }}
 
+      # The nodeabi source build loads the produced .node in-process, which a
+      # riscv64 binary cannot do on the x64 runner; its coverage for riscv64 is
+      # the napi build inside the emulated container above.
       - name: Prepare Node.js public headers
+        if: matrix.platform != 'linux-riscv64-gnu'
         run: pnpm -s headers -- --github-env
 
       - name: Test nodeabi source build
+        if: matrix.platform != 'linux-riscv64-gnu'
         shell: bash
         run: |
           for family in $FAMILIES; do

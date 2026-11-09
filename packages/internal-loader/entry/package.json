@@ -41,6 +41,7 @@
     "node-addon-internal-loader-darwin-x64": "workspace:*",
     "node-addon-internal-loader-linux-arm64-gnu": "workspace:*",
     "node-addon-internal-loader-linux-arm64-musl": "workspace:*",
+    "node-addon-internal-loader-linux-riscv64-gnu": "workspace:*",
     "node-addon-internal-loader-linux-x64-gnu": "workspace:*",
     "node-addon-internal-loader-linux-x64-musl": "workspace:*",
     "node-addon-internal-loader-win32-arm64-msvc": "workspace:*",

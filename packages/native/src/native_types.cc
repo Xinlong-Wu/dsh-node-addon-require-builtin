@@ -81,6 +81,8 @@ std::string PlatformName() {
 std::string ArchName() {
 #if defined(__aarch64__) || defined(_M_ARM64)
   return "arm64";
+#elif defined(__riscv) && (__riscv_xlen == 64)
+  return "riscv64";
 #elif defined(__x86_64__) || defined(_M_X64)
   return "x64";
 #elif defined(__arm__)

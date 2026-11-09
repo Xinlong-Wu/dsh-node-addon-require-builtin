@@ -28,6 +28,7 @@ node-addon-require-builtin-darwin-arm64
 node-addon-require-builtin-darwin-x64
 node-addon-require-builtin-linux-arm64-gnu
 node-addon-require-builtin-linux-arm64-musl
+node-addon-require-builtin-linux-riscv64-gnu
 node-addon-require-builtin-linux-x64-gnu
 node-addon-require-builtin-linux-x64-musl
 node-addon-require-builtin-win32-arm64-msvc
@@ -38,6 +39,7 @@ node-addon-internal-loader-darwin-arm64
 node-addon-internal-loader-darwin-x64
 node-addon-internal-loader-linux-arm64-gnu
 node-addon-internal-loader-linux-arm64-musl
+node-addon-internal-loader-linux-riscv64-gnu
 node-addon-internal-loader-linux-x64-gnu
 node-addon-internal-loader-linux-x64-musl
 node-addon-internal-loader-win32-arm64-msvc
@@ -155,6 +157,7 @@ The supported optional prebuild target set is intentionally conservative:
 | macOS arm64 (`darwin-arm64`) | Supported | Supported | Supported | Supported |
 | macOS x64 (`darwin-x64`) | Supported | Supported | Supported | Supported |
 | Linux glibc arm64 (`linux-arm64-gnu`) | Supported | Supported | Supported | Supported |
+| Linux glibc riscv64 (`linux-riscv64-gnu`) | Supported | Supported | Supported | Supported |
 | Linux glibc x64 (`linux-x64-gnu`) | Supported | Supported | Supported | Supported |
 | Linux musl arm64 (`linux-arm64-musl`) | Supported | Supported | Supported | Supported |
 | Linux musl x64 (`linux-x64-musl`) | Supported | Supported | Supported | Supported |
@@ -164,7 +167,11 @@ The supported optional prebuild target set is intentionally conservative:
 
 Both product families publish one `napi-v9` binary per supported platform,
 tested across Node 20, 22, 24, and 26. Linux GNU prebuilds require glibc 2.28 or
-newer and a `GLIBCXX_3.4.25`-compatible C++ runtime. Linux musl prebuilds are built
+newer and a `GLIBCXX_3.4.25`-compatible C++ runtime, except `linux-riscv64-gnu`,
+which is cross-compiled against a glibc 2.39 sysroot (the `manylinux_2_39`
+riscv64 baseline: Ubuntu 24.04+, Debian 13+, Fedora 40+) and guarantees the
+floors that build emits (`GLIBC_2.34`, `GLIBCXX_3.4.26`; see
+[docs/support-matrix.md](docs/support-matrix.md)). Linux musl prebuilds are built
 and tested on Alpine 3.23, including npm installs on musl Node 20/22/24/26.
 Node.js stopped shipping 32-bit Windows binaries after v22, so
 `win32-ia32-msvc` covers only Node 20 and 22.
