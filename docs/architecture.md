@@ -195,6 +195,7 @@ Implemented parser families:
 - macOS arm64
 - macOS x64
 - Linux arm64 (glibc and musl)
+- Linux riscv64 (gnu)
 - Linux x64 (glibc and musl)
 - Windows arm64
 - Windows x64

@@ -68,6 +68,11 @@ jobs:
       NARB_EXPECTED_NODE_MAJOR: ${{ matrix.node }}
     steps:
       - uses: actions/checkout@v4
+      - name: Set up QEMU (riscv64 emulation)
+        if: matrix.image == 'riscv64/debian:trixie'
+        uses: docker/setup-qemu-action@v3
+        with:
+          platforms: riscv64
       - uses: actions/download-artifact@v4
         with:
           name: npm-tarballs
@@ -80,8 +85,21 @@ jobs:
       - name: Verify installed packages on native runtime
         if: matrix.image == ''
         run: node scripts/verify-packed-install.mjs dist/npm
+      - name: Prepare riscv64 image with Debian's npm
+        if: matrix.runtime_prep == 'debian-node'
+        shell: bash
+        run: |
+          # No official node image publishes riscv64, and the offline
+          # verification below needs npm (which Debian splits out of nodejs).
+          # Bake npm into the image once, then verify from the baked image with
+          # the same no-network / read-only guarantees as every other platform.
+          bash scripts/pull-container.sh '${{ matrix.image }}' --platform '${{ matrix.docker_platform }}'
+          id=$(docker run -d --platform '${{ matrix.docker_platform }}' '${{ matrix.image }}' sleep infinity)
+          docker exec "$id" bash -c 'export DEBIAN_FRONTEND=noninteractive; apt-get update -qq && apt-get install -y -qq --no-install-recommends npm >/dev/null'
+          docker commit "$id" narb-install-prep:riscv64
+          docker rm -f "$id" >/dev/null
       - name: Verify installed packages in Linux runtime
-        if: matrix.image != ''
+        if: matrix.image != '' && matrix.runtime_prep != 'debian-node'
         shell: bash
         run: |
           bash scripts/pull-container.sh '${{ matrix.image }}' --platform '${{ matrix.docker_platform }}'
@@ -90,3 +108,12 @@ jobs:
             --env NARB_EXPECTED_ARCH --env NARB_EXPECTED_LIBC --env NARB_EXPECTED_NODE_MAJOR \
             --volume "$GITHUB_WORKSPACE:/workspace:ro" --workdir /workspace \
             '${{ matrix.image }}' node scripts/verify-packed-install.mjs dist/npm
+      - name: Verify installed packages in riscv64 runtime
+        if: matrix.runtime_prep == 'debian-node'
+        shell: bash
+        run: |
+          docker run --rm --pull=never --platform '${{ matrix.docker_platform }}' \
+            --network none --read-only --tmpfs /tmp:rw,exec,nosuid \
+            --env NARB_EXPECTED_ARCH --env NARB_EXPECTED_LIBC --env NARB_EXPECTED_NODE_MAJOR \
+            --volume "$GITHUB_WORKSPACE:/workspace:ro" --workdir /workspace \
+            narb-install-prep:riscv64 node scripts/verify-packed-install.mjs dist/npm
