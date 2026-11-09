@@ -71,17 +71,16 @@ They share the process C++ runtime instead of embedding another `libstdc++` or
 `libgcc`. CI builds and loads them against the manylinux 2.28 system libraries
 and rejects artifacts requiring newer than `GLIBC_2.28` or `GLIBCXX_3.4.25`.
 
-`linux-riscv64-gnu` is cross-compiled on the hosted x64 runner: GitHub
-publishes no hosted riscv64 runner, and building inside an emulated riscv64
-container — which the Debian/Ubuntu riscv64 ports do for GCC and LLVM, via
-kernel binfmt registration — would be 10-20x slower under emulation and was
-not pre-verifiable before landing. Emulation is therefore reserved for
-testing. The cross toolchain's sysroot is Ubuntu 24.04's glibc 2.39, the same
-baseline `manylinux_2_39` (riscv64, ALPHA) pins, whose compatibility range
-the produced artifact inherits: Ubuntu 24.04+, Debian 13+, Fedora 40+. CI asserts the floors the cross build actually emits —
+`linux-riscv64-gnu` is built inside the riscv64 Debian trixie container
+under QEMU on the hosted x64 runner: GitHub publishes no hosted riscv64
+runner, and QEMU's binfmt registration lets the container's gcc spawn its own
+cc1plus/as/ld children — the same mechanism the Debian/Ubuntu riscv64 ports
+use to build GCC and LLVM. The container's toolchain is glibc 2.41 / gcc 14.2
+(manylinux_2_39 (riscv64, ALPHA) pins glibc 2.39; this build sits on the
+newer trixie baseline), and CI asserts the floors the build actually emits —
 `GLIBC_2.34` and `GLIBCXX_3.4.26`. Because glibc 2.34 folded libdl into libc,
 this platform's artifact records no `libdl.so.2` dependency. The behavioral
-tests run the cross-compiled prebuilds inside a riscv64 Debian trixie
+tests run the prebuilds inside the same riscv64 Debian trixie
 container under QEMU against Debian's packaged Node 20 — a hardened libnode
 build whose getter carries the compressed frame record (`c.addi; c.sdsp;
 c.addi4spn; c.ldsp; ld; c.ret`). Electron ships no riscv64 builds and the

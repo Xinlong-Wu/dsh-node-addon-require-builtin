@@ -185,19 +185,13 @@ function linuxLibc(): 'glibc' | 'musl' | undefined {
 }
 
 function runtimeSuffix(): string {
-  // Cross builds (e.g. CXX=riscv64-linux-gnu-g++-14) run on the host node,
-  // whose process.arch is the host, not the target: NARB_TARGET_ARCH points
-  // the output paths and verification tags at the target platform. The libc
-  // detection stays host-based because the cross sysroot is chosen to match
-  // the host's libc family (glibc on the CI runners).
-  const arch = process.env.NARB_TARGET_ARCH || process.arch;
-  if (process.platform === 'darwin') return `darwin-${arch}`;
+  if (process.platform === 'darwin') return `darwin-${process.arch}`;
   if (process.platform === 'linux') {
     const libc = linuxLibc() === 'glibc' ? 'gnu' : 'musl';
-    return `linux-${arch}-${libc}`;
+    return `linux-${process.arch}-${libc}`;
   }
-  if (process.platform === 'win32') return `win32-${arch}-msvc`;
-  return `${process.platform}-${arch}`;
+  if (process.platform === 'win32') return `win32-${process.arch}-msvc`;
+  return `${process.platform}-${process.arch}`;
 }
 
 function nodePrefix(): string {

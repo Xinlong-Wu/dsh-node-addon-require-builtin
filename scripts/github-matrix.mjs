@@ -10,9 +10,8 @@ const RUNNERS = {
   'darwin-x64': 'macos-15-intel',
   'linux-arm64-gnu': 'ubuntu-24.04-arm',
   'linux-arm64-musl': 'ubuntu-24.04-arm',
-  // GitHub publishes no hosted riscv64 runner: the prebuild is
-  // cross-compiled natively on this runner and its behavioral tests run in a
-  // riscv64 Debian container under QEMU (see ci.yml).
+  // GitHub publishes no hosted riscv64 runner: the prebuild is built and
+  // tested inside a riscv64 Debian container under QEMU (see ci.yml).
   'linux-riscv64-gnu': 'ubuntu-24.04',
   'linux-x64-gnu': 'ubuntu-24.04',
   'linux-x64-musl': 'ubuntu-24.04',
@@ -25,10 +24,10 @@ const RUNNERS = {
 
 // Symbol-version floors the compatibility check asserts from readelf output.
 // x64/arm64 are pinned by the manylinux_2_28 build container (glibc 2.28,
-// GLIBCXX 3.4.25). The riscv64 cross toolchain's sysroot is Ubuntu 24.04's
-// glibc 2.39 — the same baseline manylinux_2_39 (riscv64, ALPHA) pins — and
-// the floors below are what that toolchain's output actually references
-// (measured; see docs/support-matrix.md).
+// GLIBCXX 3.4.25). The riscv64 prebuild is built inside the riscv64 Debian
+// trixie container (glibc 2.41, gcc 14.2) under QEMU, and the floors below are
+// what that toolchain's output actually references (measured; see
+// docs/support-matrix.md).
 const GLIBC_FLOOR = {
   'linux-riscv64-gnu': '2.34',
 };
